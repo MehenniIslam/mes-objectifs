@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mes Objectifs du Mois</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Reem+Kufi:wght@700&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="bg-dots" aria-hidden="true"></div>
+
+  <div class="wrap">
+    <!-- ===== En-tête : le mois ===== -->
+    <header class="top">
+      <div class="month">
+        <button class="nav" data-act="prev" aria-label="Mois précédent">‹</button>
+        <span class="kanji" id="kanji">月</span>
+        <div class="month-text">
+          <h1 id="monthName">Mois</h1>
+          <span class="year" id="monthYear"></span>
+        </div>
+        <button class="nav" data-act="next" aria-label="Mois suivant">›</button>
+      </div>
+
+      <div class="summary">
+        <div class="bubble">
+          <strong id="globalPct">0%</strong>
+          <span id="globalLabel">du mois accompli</span>
+        </div>
+        <span class="days-left" id="daysLeft"></span>
+      </div>
+    </header>
+
+    <!-- ===== Barre d'outils ===== -->
+    <nav class="toolbar">
+      <button class="btn" data-act="today" id="todayBtn" hidden>↺ Revenir à ce mois</button>
+      <button class="btn" data-act="copy" id="copyBtn">Reprendre le mois dernier</button>
+      <span class="spacer"></span>
+      <span class="saved-tag" id="savedTag" title="Chaque changement est enregistré tout seul dans ce navigateur">Enregistré automatiquement</span>
+      <button class="btn" data-act="theme" id="themeBtn">Mode nuit</button>
+      <button class="btn" data-act="export" title="Télécharge un fichier avec toutes tes données (copie de secours)">Sauvegarder un fichier</button>
+      <label class="btn" for="importFile" title="Recharge un fichier de sauvegarde">Charger</label>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+    </nav>
+
+    <!-- ===== Les panneaux ===== -->
+    <main class="board" id="board">
+      <div class="col">
+        <section class="panel" style="--i:0; --accent: var(--c-anime)">
+          <header class="panel-head">
+            <h2>Animes</h2>
+            <span class="chip" data-chip="anime">—</span>
+            <span class="sfx">アニメ</span>
+          </header>
+          <div class="panel-body" id="animeBody"></div>
+        </section>
+
+        <section class="panel" style="--i:2; --accent: var(--c-gym)">
+          <header class="panel-head">
+            <h2>Salle</h2>
+            <span class="chip" data-chip="gym">—</span>
+            <span class="sfx">ジム</span>
+          </header>
+          <div class="panel-body" id="gymBody"></div>
+        </section>
+
+        <section class="panel" style="--i:4; --accent: var(--c-money)">
+          <header class="panel-head">
+            <h2>Argent</h2>
+            <span class="chip" data-chip="money">—</span>
+            <span class="sfx">お金</span>
+          </header>
+          <div class="panel-body" id="moneyBody"></div>
+        </section>
+      </div>
+
+      <div class="col">
+        <section class="panel" style="--i:1; --accent: var(--c-quran)">
+          <header class="panel-head">
+            <h2>Sourates</h2>
+            <span class="chip" data-chip="quran">—</span>
+            <span class="sfx ar" lang="ar">القرآن</span>
+          </header>
+          <div class="panel-body" id="quranBody"></div>
+        </section>
+
+        <section class="panel" style="--i:3; --accent: var(--c-todo)">
+          <header class="panel-head">
+            <h2>Autres objectifs</h2>
+            <span class="chip" data-chip="todos">—</span>
+            <span class="sfx">その他</span>
+          </header>
+          <div class="panel-body" id="todoBody"></div>
+        </section>
+
+        <section class="panel panel-notes" style="--i:4; --accent: var(--c-notes)">
+          <header class="panel-head">
+            <h2>Notes du mois</h2>
+            <span class="sfx">メモ</span>
+          </header>
+          <div class="panel-body" id="notesBody"></div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="foot-note">
+      Tout est enregistré automatiquement dans ce navigateur.
+      Clique sur <b>Sauvegarder un fichier</b> de temps en temps pour garder une copie de secours
+      (et <b>Charger</b> pour la remettre).
+    </footer>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <span class="toast-msg"></span>
+    <button type="button" class="toast-undo" hidden>Annuler</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
