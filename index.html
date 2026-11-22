@@ -40,6 +40,7 @@
       <button class="btn" data-act="copy" id="copyBtn">Reprendre le mois dernier</button>
       <span class="spacer"></span>
       <span class="saved-tag" id="savedTag" title="Chaque changement est enregistré tout seul dans ce navigateur">Enregistré automatiquement</span>
+      <button class="btn sync-btn" data-act="sync-open" id="syncBtn" data-state="off">Synchro tél ↔ PC</button>
       <button class="btn" data-act="theme" id="themeBtn">Mode nuit</button>
       <button class="btn" data-act="export" title="Télécharge un fichier avec toutes tes données (copie de secours)">Sauvegarder un fichier</button>
       <label class="btn" for="importFile" title="Recharge un fichier de sauvegarde">Charger</label>
@@ -111,6 +112,18 @@
       Clique sur <b>Sauvegarder un fichier</b> de temps en temps pour garder une copie de secours
       (et <b>Charger</b> pour la remettre).
     </footer>
+  </div>
+
+  <!-- Fenêtre de synchro téléphone / PC -->
+  <div class="modal" id="syncModal" hidden role="dialog" aria-modal="true" aria-labelledby="syncTitle">
+    <div class="modal-card" style="--accent: var(--c-gym)">
+      <header class="panel-head">
+        <h2 id="syncTitle">Synchro tél ↔ PC</h2>
+        <span class="sfx">同期</span>
+        <button type="button" class="x" data-act="sync-close" aria-label="Fermer">×</button>
+      </header>
+      <div class="modal-body" id="syncBody"></div>
+    </div>
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite">

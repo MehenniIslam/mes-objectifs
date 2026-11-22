@@ -7,6 +7,12 @@
 
   const KEY = 'mes-objectifs-v1';
 
+  // Synchro entre appareils : les données sont gardées dans un gist secret du compte GitHub
+  const SYNC_KEY = 'mes-objectifs-sync';           // clé + infos de synchro (jamais exportées)
+  const GIST_FILE = 'mes-objectifs.json';
+  const GIST_DESC = 'Mes Objectifs du Mois : données (ne pas supprimer)';
+  const TOKEN_URL = 'https://github.com/settings/tokens/new?scopes=gist&description=Mes%20Objectifs%20synchro';
+
   const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet',
     'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
   const MOIS_COURT = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.',
@@ -60,6 +66,7 @@
 
   /* ---------- État ---------- */
   let state = load();
+  let sync = loadSync();
   let current = keyOf(new Date());
   let quranSearch = '';
   let moneyType = 'save';    // 'save' = mis de côté, 'spend' = dépense
@@ -113,18 +120,29 @@
     return normalize({});
   }
 
+  // Les données à enregistrer (sans les mois juste visités mais restés vides)
+  function serializable() {
+    const blank = JSON.stringify(emptyMonth());
+    const months = {};
+    Object.keys(state.months).forEach(k => {
+      if (JSON.stringify(state.months[k]) !== blank) months[k] = state.months[k];
+    });
+    return { ...state, months };
+  }
+
+  function persistLocal() {
+    localStorage.setItem(KEY, JSON.stringify(serializable()));
+  }
+
+  // À appeler après chaque modification : enregistre ici et prévient la synchro
   function save() {
+    state.updatedAt = Math.max(Date.now(), num(sync.remoteAt, 0) + 1);
     try {
-      // On ne garde pas les mois juste visités mais restés vides
-      const blank = JSON.stringify(emptyMonth());
-      const months = {};
-      Object.keys(state.months).forEach(k => {
-        if (JSON.stringify(state.months[k]) !== blank) months[k] = state.months[k];
-      });
-      localStorage.setItem(KEY, JSON.stringify({ ...state, months }));
+      persistLocal();
       const tag = $('#savedTag');
       if (tag) { tag.classList.remove('flash'); void tag.offsetWidth; tag.classList.add('flash'); }
     } catch (e) { toast("Oups, impossible d'enregistrer dans le navigateur."); }
+    scheduleSync();
   }
 
   const snapshot = () => JSON.stringify(state);
@@ -788,6 +806,316 @@
     reader.readAsText(file);
   }
 
+  /* =========================================================
+     Synchro téléphone ↔ PC (via un gist secret GitHub)
+     ========================================================= */
+  let syncBusy = false;
+  let syncAgain = false;
+  let syncPending = false;
+  let syncTimer = 0;
+  let syncError = '';
+  let pendingChoice = null;   // données en ligne quand il faut choisir lesquelles garder
+  let lastScopes = null;
+
+  function loadSync() {
+    try {
+      const s = JSON.parse(localStorage.getItem(SYNC_KEY) || '{}');
+      return (s && typeof s === 'object') ? s : {};
+    } catch (e) { return {}; }
+  }
+
+  function saveSync() {
+    try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (e) { /* rien */ }
+  }
+
+  function syncErr(msg, status) {
+    const e = new Error(msg);
+    e.status = status;
+    e.custom = true;
+    return e;
+  }
+
+  // Appel à l'API GitHub
+  async function gh(path, opts = {}) {
+    const headers = {
+      Authorization: 'Bearer ' + (opts.token || sync.token),
+      Accept: 'application/vnd.github+json'
+    };
+    if (opts.body) headers['Content-Type'] = 'application/json';
+    const res = await fetch('https://api.github.com' + path, {
+      method: opts.method || 'GET',
+      headers,
+      cache: 'no-store',
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      keepalive: Boolean(opts.keepalive)
+    });
+    lastScopes = res.headers.get('x-oauth-scopes');
+    if (!res.ok) {
+      let msg = `GitHub a répondu une erreur (${res.status}).`;
+      if (res.status === 403 && res.headers.get('x-ratelimit-remaining') === '0') {
+        msg = "Trop de synchros d'un coup : GitHub demande d'attendre un peu.";
+      } else if (res.status === 403) {
+        msg = "GitHub refuse l'accès. Vérifie que la case « gist » était cochée quand tu as créé la clé.";
+      }
+      throw syncErr(msg, res.status);
+    }
+    return res.status === 204 ? null : res.json();
+  }
+
+  function friendly(e, connecting) {
+    if (e && e.status === 401) {
+      return connecting
+        ? "Cette clé ne marche pas. Vérifie que tu l'as copiée en entier (elle commence par ghp_)."
+        : 'GitHub refuse ta clé (supprimée ou expirée). Clique sur « Déconnecter cet appareil » puis colle une nouvelle clé.';
+    }
+    if (e && e.custom) return e.message;
+    return "Pas d'internet pour le moment. Ça se synchronisera tout seul plus tard.";
+  }
+
+  // Lit les données en ligne : { data, updatedAt } ou null s'il n'y a rien
+  async function fetchGist() {
+    if (!sync.gistId) return null;
+    let g;
+    try { g = await gh('/gists/' + sync.gistId); }
+    catch (e) { if (e.status === 404) return null; throw e; }
+    const f = g && g.files && g.files[GIST_FILE];
+    if (!f) return null;
+    let content = f.content;
+    if (f.truncated && f.raw_url) content = await (await fetch(f.raw_url, { cache: 'no-store' })).text();
+    try {
+      const data = JSON.parse(content);
+      const updatedAt = num(data.updatedAt, 0);
+      sync.remoteAt = updatedAt;
+      return { data, updatedAt };
+    } catch (e) { return null; }
+  }
+
+  // Envoie les données de cet appareil en ligne
+  async function pushGist(keepalive) {
+    if (!state.updatedAt) state.updatedAt = Date.now();
+    const files = { [GIST_FILE]: { content: JSON.stringify(serializable()) } };
+    if (sync.gistId) {
+      try {
+        await gh('/gists/' + sync.gistId, { method: 'PATCH', body: { files }, keepalive });
+        sync.remoteAt = state.updatedAt;
+        saveSync();
+        return;
+      } catch (e) { if (e.status !== 404) throw e; }
+    }
+    const g = await gh('/gists', { method: 'POST', body: { description: GIST_DESC, public: false, files } });
+    sync.gistId = g.id;
+    sync.remoteAt = state.updatedAt;
+    saveSync();
+  }
+
+  // Remplace les données de cet appareil par celles en ligne (le thème reste celui de l'appareil)
+  function applyRemote(data, notify) {
+    const snap = snapshot();
+    const theme = state.theme;
+    state = normalize(JSON.parse(JSON.stringify(data)));
+    state.theme = theme;
+    try { persistLocal(); } catch (e) { /* rien */ }
+    lastGlobal = null;
+    renderAll();
+    if (notify) toast('Mis à jour avec ton autre appareil ✓', snap);
+  }
+
+  function isBlank(s) {
+    const n = normalize(JSON.parse(JSON.stringify(s || {})));
+    return Object.values(n.months).every(isEmpty) && !Object.keys(n.quran.learned).length && !n.jars.length;
+  }
+
+  function sameData(a, b) {
+    const pick = s => {
+      const n = normalize(JSON.parse(JSON.stringify(s || {})));
+      const blank = JSON.stringify(emptyMonth());
+      const months = {};
+      Object.keys(n.months).sort().forEach(k => {
+        if (JSON.stringify(n.months[k]) !== blank) months[k] = n.months[k];
+      });
+      return JSON.stringify({ months, learned: n.quran.learned, jars: n.jars });
+    };
+    return pick(a) === pick(b);
+  }
+
+  // Compare avec la version en ligne : la plus récente gagne
+  async function syncNow() {
+    if (!sync.token) return;
+    if (syncBusy) { syncAgain = true; return; }
+    syncBusy = true;
+    clearTimeout(syncTimer);
+    syncPending = false;
+    setSyncStatus('busy');
+    try {
+      if (sync.needsChoice) {
+        if (!pendingChoice) pendingChoice = await fetchGist();
+        if (pendingChoice) {
+          syncError = 'Choisis quelles données garder : clique sur le bouton de synchro.';
+          setSyncStatus('err');
+          return;
+        }
+        sync.needsChoice = false;
+        saveSync();
+      }
+      const remote = await fetchGist();
+      const localAt = num(state.updatedAt, 0);
+      if (remote && remote.updatedAt > localAt) applyRemote(remote.data, true);
+      else if (!remote || localAt > remote.updatedAt) await pushGist();
+      sync.lastSync = Date.now();
+      syncError = '';
+      saveSync();
+      setSyncStatus('ok');
+    } catch (e) {
+      syncError = friendly(e);
+      setSyncStatus('err');
+    } finally {
+      syncBusy = false;
+      if (!$('#syncModal').hidden) renderSyncModal();
+      if (syncAgain) { syncAgain = false; syncNow(); }
+    }
+  }
+
+  function scheduleSync() {
+    if (!sync.token) return;
+    syncPending = true;
+    setSyncStatus('busy');
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(syncNow, 1500);
+  }
+
+  // Quand on quitte la page ou change d'appli : on envoie tout de suite ce qui attend
+  function flushSync() {
+    if (!syncPending || !sync.token || sync.needsChoice || syncBusy) return;
+    clearTimeout(syncTimer);
+    syncPending = false;
+    pushGist(true)
+      .then(() => { sync.lastSync = Date.now(); saveSync(); setSyncStatus('ok'); })
+      .catch(() => { syncPending = true; });
+  }
+
+  function finishSync(msg) {
+    sync.lastSync = Date.now();
+    syncError = '';
+    saveSync();
+    setSyncStatus('ok');
+    renderSyncModal();
+    if (msg) toast(msg);
+  }
+
+  // Première connexion de cet appareil avec la clé
+  async function connectSync(token, btn) {
+    token = String(token || '').trim();
+    if (!token) return;
+    syncError = '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Connexion…'; }
+    try {
+      const user = await gh('/user', { token });
+      if (lastScopes !== null && !lastScopes.split(',').map(s => s.trim()).includes('gist')) {
+        throw syncErr("Cette clé n'a pas la case « gist » cochée. Recrée-la avec le lien de l'étape 1.", 0);
+      }
+      const gists = await gh('/gists?per_page=100', { token });
+      const found = Array.isArray(gists) ? gists.find(g => g.files && g.files[GIST_FILE]) : null;
+      sync = { token, login: user.login, gistId: found ? found.id : null, lastSync: 0, remoteAt: 0 };
+      saveSync();
+
+      const remote = found ? await fetchGist() : null;
+      if (!remote || isBlank(remote.data)) {
+        await pushGist();
+        finishSync('Synchro activée ✓ Fais pareil sur ton autre appareil.');
+      } else if (isBlank(state) || sameData(remote.data, state)) {
+        applyRemote(remote.data, false);
+        finishSync('Synchro activée ✓ Tes données sont arrivées.');
+      } else {
+        pendingChoice = remote;
+        sync.needsChoice = true;
+        saveSync();
+        setSyncStatus('err');
+        renderSyncModal();
+      }
+    } catch (e) {
+      sync = {};
+      try { localStorage.removeItem(SYNC_KEY); } catch (err) { /* rien */ }
+      syncError = friendly(e, true);
+      setSyncStatus('off');
+      renderSyncModal();
+    }
+  }
+
+  function setSyncStatus(st) {
+    const b = $('#syncBtn');
+    if (!b) return;
+    const s = sync.token ? st : 'off';
+    b.dataset.state = s;
+    b.textContent = { off: 'Synchro tél ↔ PC', ok: 'Synchronisé', busy: 'Synchro…', err: 'Synchro en pause' }[s];
+    b.title = s === 'err' ? syncError
+      : s === 'off' ? 'Avoir les mêmes données sur ton téléphone et ton PC'
+        : 'Synchronisé avec ton compte GitHub';
+  }
+
+  const dateTime = t => new Date(t).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
+
+  function renderSyncModal() {
+    const box = $('#syncBody');
+    const err = syncError ? `<p class="sync-err">${esc(syncError)}</p>` : '';
+
+    if (pendingChoice) {
+      box.innerHTML = `
+        <p><b>Tu as déjà des données en ligne</b> (dernière modif : ${pendingChoice.updatedAt ? dateTime(pendingChoice.updatedAt) : '?'})
+          <b>et</b> d'autres données sur cet appareil.</p>
+        <p>Lesquelles tu gardes ? Les autres seront remplacées.</p>
+        <div class="sync-actions">
+          <button type="button" class="btn primary" data-act="sync-take-remote">Prendre celles en ligne</button>
+          <button type="button" class="btn" data-act="sync-keep-local">Garder celles de cet appareil</button>
+        </div>
+        <p class="hint">En général, sur ton 2e appareil, choisis « Prendre celles en ligne ».</p>`;
+      return;
+    }
+
+    if (sync.token) {
+      box.innerHTML = `
+        <p class="sync-ok">Synchro activée avec le compte GitHub <b>${esc(sync.login || '?')}</b>.</p>
+        <p>Dernière synchro : <b>${sync.lastSync ? dateTime(sync.lastSync) : 'pas encore'}</b></p>
+        ${err}
+        <p>Ça marche tout seul : chaque changement est envoyé, et quand tu ouvres le site sur ton autre appareil, il récupère la dernière version.</p>
+        <div class="sync-actions">
+          <button type="button" class="btn primary" data-act="sync-now">Synchroniser maintenant</button>
+          <button type="button" class="btn" data-act="sync-logout">Déconnecter cet appareil</button>
+        </div>
+        <p class="hint">Sur ton autre appareil : ouvre le même site, clique sur « Synchro tél ↔ PC » et colle ta clé.</p>`;
+      return;
+    }
+
+    box.innerHTML = `
+      <p>Tes données seront gardées dans ton compte GitHub, dans un « gist » secret.
+        Tu fais ça <b>une seule fois</b> sur chaque appareil.</p>
+      <ol class="steps">
+        <li><b>Crée ta clé.</b> Ouvre <a href="${TOKEN_URL}" target="_blank" rel="noopener">cette page GitHub</a>
+          (la case <code>gist</code> est déjà cochée). Choisis une durée, par exemple 1 an, descends tout en bas,
+          clique sur <b>Generate token</b> et copie la clé (elle commence par <code>ghp_</code>).</li>
+        <li><b>Colle-la ici :</b>
+          <form class="token-row" data-form="sync" autocomplete="off">
+            <input name="token" type="password" placeholder="ghp_…" required spellcheck="false" autocapitalize="off" aria-label="Clé GitHub">
+            <button class="btn primary" type="submit">Connecter</button>
+          </form>
+        </li>
+        <li><b>Sur ton autre appareil</b> (téléphone ou PC) : ouvre le site, clique sur « Synchro tél ↔ PC » et colle la même clé.</li>
+      </ol>
+      ${err}
+      <p class="hint">La clé reste seulement sur l'appareil où tu la colles, et elle donne accès uniquement à tes gists. Ne la donne à personne.</p>`;
+  }
+
+  function openSyncModal() {
+    renderSyncModal();
+    $('#syncModal').hidden = false;
+    const inp = $('#syncBody input[name="token"]');
+    if (inp) setTimeout(() => inp.focus(), 60);
+    if (sync.needsChoice && !pendingChoice) syncNow();
+  }
+
+  function closeSyncModal() {
+    $('#syncModal').hidden = true;
+  }
+
   /* ---------- Thème ---------- */
   function applyTheme(theme) {
     document.documentElement.dataset.theme = theme;
@@ -800,6 +1128,7 @@
   const byId = (list, id) => list.find(x => x.id === id);
 
   document.addEventListener('click', e => {
+    if (e.target.id === 'syncModal') { closeSyncModal(); return; }   // clic à côté de la fenêtre
     const t = e.target.closest('[data-act]');
     if (!t || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') return;
     const act = t.dataset.act;
@@ -817,6 +1146,45 @@
       }
       case 'copy': copyPrevious(); break;
       case 'export': exportData(); break;
+
+      /* --- synchro --- */
+      case 'sync-open': openSyncModal(); break;
+      case 'sync-close': closeSyncModal(); break;
+      case 'sync-now': syncNow(); break;
+      case 'sync-logout':
+        sync = {};
+        pendingChoice = null;
+        syncError = '';
+        try { localStorage.removeItem(SYNC_KEY); } catch (err) { /* rien */ }
+        setSyncStatus('off');
+        renderSyncModal();
+        toast('Cet appareil est déconnecté. Tes données restent ici.');
+        break;
+      case 'sync-take-remote': {
+        if (!pendingChoice) return;
+        const remote = pendingChoice;
+        const snap = snapshot();
+        pendingChoice = null;
+        sync.needsChoice = false;
+        applyRemote(remote.data, false);
+        finishSync();
+        toast('Synchro activée ✓ Tes données en ligne sont arrivées.', snap);
+        break;
+      }
+      case 'sync-keep-local': {
+        if (!pendingChoice) return;
+        const remote = pendingChoice;
+        pendingChoice = null;
+        sync.needsChoice = false;
+        state.updatedAt = Math.max(Date.now(), num(remote.updatedAt, 0) + 1);
+        try { persistLocal(); } catch (err) { /* rien */ }
+        setSyncStatus('busy');
+        renderSyncModal();
+        pushGist()
+          .then(() => finishSync('Synchro activée ✓ Les données de cet appareil sont en ligne.'))
+          .catch(err => { syncError = friendly(err); setSyncStatus('err'); renderSyncModal(); });
+        break;
+      }
       case 'theme': {
         const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
         state.theme = next;
@@ -1095,6 +1463,7 @@
   document.addEventListener('keydown', e => {
     const t = e.target;
     // Ctrl+S : tout est déjà enregistré, on le confirme
+    if (e.key === 'Escape' && !$('#syncModal').hidden) { closeSyncModal(); return; }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
       e.preventDefault();
       if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
@@ -1121,6 +1490,11 @@
     const d = Object.fromEntries(new FormData(form));
     const m = M();
     const type = form.dataset.form;
+
+    if (type === 'sync') {
+      connectSync(d.token, $('button[type="submit"]', form));
+      return;
+    }
 
     if (type === 'anime') {
       const name = String(d.name || '').trim();
@@ -1200,10 +1574,20 @@
 
   // Au cas où on ferme la page pendant qu'on écrit une note
   window.addEventListener('pagehide', () => {
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* rien */ }
+    try { persistLocal(); } catch (e) { /* rien */ }
+    flushSync();
   });
+
+  // On revient sur le site (autre onglet, autre appli) : on récupère la dernière version
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushSync();
+    else syncNow();
+  });
+  window.addEventListener('online', () => syncNow());
 
   /* ---------- Démarrage ---------- */
   applyTheme(state.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
   renderAll(0);
+  setSyncStatus(sync.token ? 'busy' : 'off');
+  if (sync.token) syncNow();
 })();

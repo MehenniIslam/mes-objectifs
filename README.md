@@ -8,7 +8,14 @@ Un petit site au style manga pour noter mes objectifs chaque mois :
 - **Argent** : épargne, dépenses, budget et cagnottes
 - **Autres objectifs** et **notes du mois**
 
-Tout est enregistré dans le navigateur (localStorage). Les données ne partent sur aucun serveur.
+Tout est enregistré dans le navigateur (localStorage).
 Le bouton « Sauvegarder un fichier » télécharge une copie de secours, et « Charger » la remet.
+
+## Synchro téléphone ↔ PC
+
+Le bouton « Synchro tél ↔ PC » garde les données dans un gist secret de mon compte GitHub.
+Il faut une clé GitHub avec seulement le droit `gist`, collée une fois sur chaque appareil.
+La clé reste dans le navigateur de l'appareil et n'est jamais mise dans le code ni dans les sauvegardes.
+Si les deux appareils ont changé quelque chose, c'est la modification la plus récente qui gagne.
 
 Fait en HTML, CSS et JavaScript, sans librairie.
