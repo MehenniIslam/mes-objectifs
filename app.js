@@ -78,8 +78,10 @@
     chapter: 1,       // chapitre de manga lu
     mangaGoal: 20,    // objectif de chapitres du mois atteint
     mangaDone: 50,    // manga terminé
-    quest: 40         // quête de la semaine réussie
+    quest: 40,        // quête de la semaine réussie
+    skillTier: 30     // figure de callisthénie réussie : 30 XP × son niveau (30 à 150)
   };
+  const CALI = window.CALI || { TIERS: [], SKILLS: [], svg: () => '' };
 
   // Animes et mangas partagent le même affichage
   const KINDS = {
@@ -189,6 +191,7 @@
     s.quran.reviews = (s.quran.reviews && typeof s.quran.reviews === 'object') ? s.quran.reviews : {};   // date → sourates révisées
     s.quran.learnedOn = (s.quran.learnedOn && typeof s.quran.learnedOn === 'object') ? s.quran.learnedOn : {};
     s.questWeeks = (s.questWeeks && typeof s.questWeeks === 'object') ? s.questWeeks : {};   // quêtes tirées pour chaque semaine
+    s.cali = (s.cali && typeof s.cali === 'object') ? s.cali : {};   // figure → { s: 'work' | 'done', rec, at }
     return s;
   }
 
@@ -611,6 +614,70 @@
         <input name="total" type="number" min="0" inputmode="numeric" placeholder="Total ch.">
         <button class="btn primary" type="submit">Ajouter</button>
       </form>`;
+  }
+
+  /* ---------- Callisthénie ---------- */
+  const caliOpen = new Map();   // niveau → ouvert / fermé à la main
+
+  const fmtDay = dk => { if (!dk) return ''; const [y, m, d] = dk.split('-').map(Number); return `${d} ${MOIS_COURT[m - 1]} ${y}`; };
+
+  function renderCali() {
+    const st = id => state.cali[id] || {};
+    const done = CALI.SKILLS.filter(s => st(s.id).s === 'done');
+    const next = CALI.SKILLS.find(s => st(s.id).s !== 'done');
+    const working = CALI.SKILLS.filter(s => st(s.id).s === 'work');
+    const openTier = next ? next.tier : 0;
+    $('#caliChip').textContent = `${done.length}/${CALI.SKILLS.length}`;
+
+    const card = s => {
+      const x = st(s.id);
+      const isDone = x.s === 'done';
+      const isWork = x.s === 'work';
+      return `
+        <article class="skill ${isDone ? 'done' : ''} ${isWork ? 'work' : ''}" data-skill="${s.id}">
+          <div class="skill-img">${CALI.svg(s)}</div>
+          <div class="skill-info">
+            <div class="skill-title"><span class="skill-num">${CALI.SKILLS.indexOf(s) + 1}</span><b>${esc(s.name)}</b></div>
+            <small class="skill-en">${esc(s.en)} · +${s.tier * XP.skillTier} XP</small>
+            <p class="skill-goal">Objectif : <b>${esc(s.goal)}</b></p>
+            <details class="skill-tip"><summary>Conseil</summary><p>${esc(s.tip)}</p></details>
+            <input class="ghost skill-rec" data-act="skill-rec" value="${esc(x.rec || '')}" placeholder="Ton record (ex : 6 s, 3 reps)" maxlength="30" aria-label="Ton record">
+            <div class="skill-actions">
+              ${isDone
+                ? `<span class="skill-date">Réussi le ${fmtDay(x.at)}</span><button type="button" class="btn sm" data-act="skill-undo">Annuler</button>`
+                : `<button type="button" class="btn sm ${isWork ? 'on' : ''}" data-act="skill-work" aria-pressed="${isWork}">${isWork ? 'En cours ✓' : 'Je travaille'}</button>
+                   <button type="button" class="btn sm primary" data-act="skill-done">Réussi !</button>`}
+            </div>
+          </div>
+          ${isDone ? `<span class="hanko sm ${fresh.has('k' + s.id) ? 'fresh' : ''}" aria-hidden="true">済</span>` : ''}
+        </article>`;
+    };
+
+    const tiers = CALI.TIERS.map(t => {
+      const list = CALI.SKILLS.filter(s => s.tier === t.n);
+      const d = list.filter(s => st(s.id).s === 'done').length;
+      const open = caliOpen.has(t.n) ? caliOpen.get(t.n) : t.n === openTier;
+      return `
+        <details class="tier" data-tier="${t.n}" ${open ? 'open' : ''} style="--tier: var(--tier-${t.n})">
+          <summary>
+            <span class="tier-n">Niv. ${t.n}</span>
+            <b>${t.name}</b>
+            <span class="jp" lang="ja">${t.jp}</span>
+            <span class="tier-count ${d === list.length ? 'full' : ''}">${d}/${list.length}</span>
+          </summary>
+          <div class="skill-list">${list.map(card).join('')}</div>
+        </details>`;
+    }).join('');
+
+    $('#caliBody').innerHTML = `
+      <div class="cali-stats">
+        <div class="q-stat"><span class="big">${done.length}</span><span class="of">/ ${CALI.SKILLS.length} figures réussies</span></div>
+        <p class="cali-next">${next ? `Prochain défi : <b>${esc(next.name)}</b> · ${esc(next.goal.toLowerCase())}` : '<b>Toutes les figures sont réussies. Légende !</b>'}</p>
+      </div>
+      ${bar('cali', CALI.SKILLS.length ? done.length / CALI.SKILLS.length : 0)}
+      ${working.length ? `<p class="hint">En cours : ${working.map(s => esc(s.name)).join(', ')}</p>` : ''}
+      <div class="tiers">${tiers}</div>
+      <p class="hint">De la plus facile à la plus dure. Touche « Réussi ! » quand tu tiens l'objectif proprement, et note ton record pour voir tes progrès.</p>`;
   }
 
   /* ---------- Habitudes du jour ---------- */
@@ -1328,6 +1395,7 @@
     });
     Object.keys(state.daily).forEach(d => set.add(d));
     Object.keys(state.quran.reviews).forEach(d => set.add(d));
+    Object.values(state.cali).forEach(x => { if (x.at) set.add(x.at); });
     return new Set([...set].filter(d => d <= today));
   }
 
@@ -1407,11 +1475,16 @@
     p.surah = learnedTotal();
     p.review = Object.values(state.quran.reviews).reduce((t, l) => t + l.length, 0);
     p.quest = questsDoneTotal();
+    p.skills = 0;
+    p.skillXp = 0;
+    CALI.SKILLS.forEach(s => {
+      if ((state.cali[s.id] || {}).s === 'done') { p.skills++; p.skillXp += s.tier * XP.skillTier; }
+    });
     const xp = p.session * XP.session + p.surah * XP.surah + p.episode * XP.episode +
       p.animeGoal * XP.animeGoal + p.animeDone * XP.animeDone + p.todo * XP.todo + p.lift * XP.lift +
       p.saveGoal * XP.saveGoal + Math.floor(p.saved / 10) * XP.per10eur + p.perfect * XP.perfect +
       p.habit * XP.habit + p.review * XP.review + p.chapter * XP.chapter +
-      p.mangaGoal * XP.mangaGoal + p.mangaDone * XP.mangaDone + p.quest * XP.quest;
+      p.mangaGoal * XP.mangaGoal + p.mangaDone * XP.mangaDone + p.quest * XP.quest + p.skillXp;
     return { xp, p };
   }
 
@@ -1425,6 +1498,7 @@
     { id: 'habits', need: 'habits', target: () => 4, label: t => `Fais toutes tes habitudes ${t} jours`, m: c => c.habits },
     { id: 'save', need: 'money', target: () => 20, label: t => `Mets ${eur(t)} de côté`, m: c => c.save, fmt: v => eur(v) },
     { id: 'todo', need: 'todos', target: () => 3, label: t => `Coche ${t} autres objectifs`, m: c => c.todo },
+    { id: 'cali', need: 'cali', target: () => 1, label: () => 'Réussis une nouvelle figure de callisthénie', m: c => c.cali },
     { id: 'active', need: null, target: () => 5, label: t => `Sois actif ${t} jours dans la semaine`, m: c => c.active }
   ];
 
@@ -1438,7 +1512,8 @@
       manga: months.some(m => m.mangas.length),
       habits: state.habits.length > 0,
       money: months.some(m => m.money.entries.some(e => e.type === 'save') || m.money.saveGoal > 0),
-      todos: months.some(m => m.todos.length)
+      todos: months.some(m => m.todos.length),
+      cali: Object.keys(state.cali).length > 0
     };
   }
 
@@ -1456,8 +1531,9 @@
   function weekCounts(mk, act) {
     const dates = weekDates(mk);
     const gymSet = new Set(allGymDates());
-    const c = { gym: 0, review: 0, learn: 0, ep: 0, ch: 0, habits: 0, save: 0, todo: 0, active: 0 };
+    const c = { gym: 0, review: 0, learn: 0, ep: 0, ch: 0, habits: 0, save: 0, todo: 0, active: 0, cali: 0 };
     const learnDays = Object.values(state.quran.learnedOn);
+    c.cali = Object.values(state.cali).filter(x => x.s === 'done' && dates.includes(x.at)).length;
     dates.forEach(d => {
       const k = d.slice(0, 7);
       const day = Number(d.slice(8));
@@ -1581,7 +1657,12 @@
     { id: 'habit30', kanji: '習', name: 'Discipline', desc: 'Réussir 30 habitudes', v: s => s.habits, goal: 30 },
     { id: 'quest5', kanji: '冒', name: 'Aventurier', desc: 'Réussir 5 quêtes', v: s => s.quests, goal: 5 },
     { id: 'perfect', kanji: '極', name: 'Mois parfait', desc: 'Finir un mois à 100 %', v: s => s.perfect, goal: 1 },
-    { id: 'lvl10', kanji: '侍', name: 'Samouraï', desc: 'Atteindre le niveau 10', v: s => s.level, goal: 10 }
+    { id: 'lvl10', kanji: '侍', name: 'Samouraï', desc: 'Atteindre le niveau 10', v: s => s.level, goal: 10 },
+    { id: 'cali1', kanji: '体', name: 'Premier skill', desc: 'Réussir une figure de callisthénie', v: s => s.skills, goal: 1 },
+    { id: 'cali10', kanji: '技', name: 'Street workout', desc: 'Réussir 10 figures de callisthénie', v: s => s.skills, goal: 10 },
+    { id: 'caliHs', kanji: '立', name: 'Équilibriste', desc: "Réussir l'équilibre libre", v: s => s.skillHs, goal: 1 },
+    { id: 'caliFl', kanji: '翔', name: 'Lévitation', desc: 'Réussir le front lever', v: s => s.skillFl, goal: 1 },
+    { id: 'caliT5', kanji: '神', name: 'Dieu du street', desc: 'Réussir une figure de niveau Légende', v: s => s.skillT5, goal: 1 }
   ];
 
   function badgeStats(xpInfo) {
@@ -1607,7 +1688,11 @@
         const spent = moneySum(m.money, 'spend');
         return k < nowKey && m.money.budget > 0 && spent > 0 && spent <= m.money.budget;
       }).length,
-      bestStreak: streaks().best
+      bestStreak: streaks().best,
+      skills: p.skills,
+      skillHs: (state.cali.hs || {}).s === 'done' ? 1 : 0,
+      skillFl: (state.cali.fl || {}).s === 'done' ? 1 : 0,
+      skillT5: CALI.SKILLS.filter(sk => sk.tier === 5 && (state.cali[sk.id] || {}).s === 'done').length
     };
   }
 
@@ -1616,6 +1701,7 @@
   function checkBadges(stats) {
     const ok = BADGES.filter(b => b.v(stats) >= b.goal);
     $('#badgeCount').textContent = ok.length;
+    $('#badgeTotal').textContent = BADGES.length;
     let seen = null;
     try { seen = JSON.parse(localStorage.getItem(BADGE_KEY) || 'null'); } catch (e) { /* rien */ }
     const ids = ok.map(b => b.id);
@@ -1813,7 +1899,8 @@
       ['Chapitres de manga lus', p.chapter, XP.chapter],
       ["Objectifs de chapitres atteints", p.mangaGoal, XP.mangaGoal],
       ['Mangas terminés', p.mangaDone, XP.mangaDone],
-      ['Quêtes réussies', p.quest, XP.quest]
+      ['Quêtes réussies', p.quest, XP.quest],
+      ['Figures de callisthénie réussies', p.skills, 0, p.skillXp]
     ].filter(r => r[1] > 0);
 
     // Animes terminés (tous les mois)
@@ -1880,7 +1967,7 @@
       </details>
 
       <h3 class="sub">D'où vient ton XP</h3>
-      ${xpRows.length ? `<ul class="xp-list">${xpRows.map(r => `<li><span>${r[0]}</span><em>${r[1]} × ${r[2]}</em><b>${r[1] * r[2]} XP</b></li>`).join('')}</ul>`
+      ${xpRows.length ? `<ul class="xp-list">${xpRows.map(r => `<li><span>${r[0]}</span><em>${r[2] ? `${r[1]} × ${r[2]}` : `${r[1]} (selon le niveau)`}</em><b>${r[3] !== undefined ? r[3] : r[1] * r[2]} XP</b></li>`).join('')}</ul>`
         : '<p class="empty-line">Pas encore d\'XP : coche une séance, apprends une sourate ou regarde un épisode pour commencer.</p>'}
 
       <h3 class="sub">Animes terminés</h3>
@@ -1944,6 +2031,7 @@
     renderQuran();
     renderManga();
     renderHabits();
+    renderCali();
     renderGym();
     renderMoney();
     renderTodos();
@@ -2617,6 +2705,28 @@
         break;
       }
 
+      /* --- callisthénie --- */
+      case 'skill-work':
+      case 'skill-done':
+      case 'skill-undo': {
+        const sid = t.closest('[data-skill]').dataset.skill;
+        const sk = CALI.SKILLS.find(s => s.id === sid);
+        if (!sk) return;
+        const x = state.cali[sid] || {};
+        let won = false;
+        if (act === 'skill-work') x.s = x.s === 'work' ? undefined : 'work';
+        if (act === 'skill-done') { x.s = 'done'; x.at = dateKey(new Date()); won = true; markActive(); fresh.add('k' + sid); }
+        if (act === 'skill-undo') { x.s = 'work'; delete x.at; }
+        if (!x.s && !x.rec) delete state.cali[sid]; else state.cali[sid] = x;
+        const { x: px, y: py } = centerOf(t);
+        save(); renderCali(); renderHeader(); afterRender();
+        if (won) {
+          celebrate($(`#caliBody [data-skill="${sid}"]`), 'やった!');
+          floatText(px, py - 10, `+${sk.tier * XP.skillTier} XP`);
+        }
+        break;
+      }
+
       /* --- révision --- */
       case 'review': {
         const n = Number(t.dataset.n);
@@ -2863,6 +2973,14 @@
         if (h) { h.name = t.value.trim() || h.name; t.value = h.name; save(); renderHeader(); }
         break;
       }
+      case 'skill-rec': {
+        const sid = t.closest('[data-skill]').dataset.skill;
+        const x = state.cali[sid] || {};
+        x.rec = t.value.trim();
+        if (!x.s && !x.rec) delete state.cali[sid]; else state.cali[sid] = x;
+        save();
+        break;
+      }
       case 'quran-goal':
         m.quranGoal = Math.max(0, Math.min(114, Math.round(num(t.value, 0))));
         save(); renderQuran(); renderHeader(); afterRender();
@@ -2950,6 +3068,14 @@
       showSuggest(t.closest('form').dataset.form, t);
     }
   });
+
+  // On retient les niveaux de callisthénie ouverts / fermés à la main
+  document.addEventListener('toggle', e => {
+    const d = e.target;
+    if (!d.classList || !d.classList.contains('tier')) return;
+    const n = Number(d.dataset.tier);
+    caliOpen.set(n, d.open);
+  }, true);
 
   // Quand on quitte la partie Animes, on applique les infos arrivées pendant la saisie
   $('#animeBody').addEventListener('focusout', () => {

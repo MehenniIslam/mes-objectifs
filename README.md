@@ -12,7 +12,8 @@ Un petit site au style manga pour noter mes objectifs chaque mois :
 - **Habitudes du jour** (grille à cocher, plusieurs fois par jour possible, ex. prières 5/5)
 - **Révision des sourates** : celles pas révisées depuis le plus longtemps sont proposées en premier
 - **Mangas** : chapitres, couvertures et parution via AniList
-- **Quêtes de la semaine** (3 par semaine, +40 XP) et **24 succès** à débloquer
+- **Quêtes de la semaine** (3 par semaine, +40 XP) et **29 succès** à débloquer
+- **Callisthénie** : 24 figures dessinées (de la suspension à l'équilibre sur un bras), rangées en 5 niveaux, avec objectif, conseil et record (`cali.js`)
 - **Appli** : installable sur l'écran d'accueil du téléphone (logo dans `icons/`, source dans `icons/logo.html`), marche sans internet
 
 Tout est enregistré dans le navigateur (localStorage).

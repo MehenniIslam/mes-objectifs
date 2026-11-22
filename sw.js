@@ -1,8 +1,8 @@
 /* Service worker : permet d'installer le site comme une appli et de l'ouvrir sans internet. */
-const CACHE = 'mes-objectifs-v5';
+const CACHE = 'mes-objectifs-v6';
 const EXT_CACHE = 'mes-objectifs-ext';   // polices et affiches d'animes
 const SHELL = [
-  './', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
+  './', 'index.html', 'style.css', 'cali.js', 'app.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-64.png'
 ];
 

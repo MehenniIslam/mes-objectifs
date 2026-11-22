@@ -62,7 +62,7 @@
       </div>
       <button class="hud-chip" data-act="bilan-open" title="Voir tes succès">
         <span class="badge ok" aria-hidden="true">賞</span>
-        <span><b id="badgeCount">0</b>/24 <small>succès</small></span>
+        <span><b id="badgeCount">0</b>/<span id="badgeTotal">29</span> <small>succès</small></span>
       </button>
     </div>
 
@@ -96,7 +96,7 @@
           <div class="panel-body" id="animeBody"></div>
         </section>
 
-        <section class="panel" style="--i:2; --accent: var(--c-manga); --o:5">
+        <section class="panel" style="--i:2; --accent: var(--c-manga); --o:6">
           <header class="panel-head">
             <h2>Mangas</h2>
             <span class="chip" data-chip="manga">—</span>
@@ -105,7 +105,7 @@
           <div class="panel-body" id="mangaBody"></div>
         </section>
 
-        <section class="panel" style="--i:4; --accent: var(--c-money); --o:6">
+        <section class="panel" style="--i:4; --accent: var(--c-money); --o:7">
           <header class="panel-head">
             <h2>Argent</h2>
             <span class="chip" data-chip="money">—</span>
@@ -143,7 +143,16 @@
           <div class="panel-body" id="gymBody"></div>
         </section>
 
-        <section class="panel" style="--i:3; --accent: var(--c-todo); --o:7">
+        <section class="panel" style="--i:4; --accent: var(--c-cali); --o:5">
+          <header class="panel-head">
+            <h2>Callisthénie</h2>
+            <span class="chip" id="caliChip">—</span>
+            <span class="sfx">自重</span>
+          </header>
+          <div class="panel-body" id="caliBody"></div>
+        </section>
+
+        <section class="panel" style="--i:3; --accent: var(--c-todo); --o:8">
           <header class="panel-head">
             <h2>Autres objectifs</h2>
             <span class="chip" data-chip="todos">—</span>
@@ -152,7 +161,7 @@
           <div class="panel-body" id="todoBody"></div>
         </section>
 
-        <section class="panel panel-notes" style="--i:4; --accent: var(--c-notes); --o:8">
+        <section class="panel panel-notes" style="--i:4; --accent: var(--c-notes); --o:9">
           <header class="panel-head">
             <h2>Notes du mois</h2>
             <span class="sfx">メモ</span>
@@ -200,6 +209,7 @@
     <button type="button" class="toast-undo" hidden>Annuler</button>
   </div>
 
+  <script src="cali.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

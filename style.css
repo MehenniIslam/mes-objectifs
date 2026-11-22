@@ -20,6 +20,12 @@
   --c-notes: #17130e;
   --c-habit: #c2255c;
   --c-manga: #0b7285;
+  --c-cali: #862e9c;
+  --tier-1: #2f9e44;
+  --tier-2: #1c7ed6;
+  --tier-3: #f08c00;
+  --tier-4: #e03131;
+  --tier-5: #862e9c;
 
   /* Couleurs des catégories de dépenses (palette vérifiée daltonisme, ordre fixe) */
   --cat-0: #8b8374;
@@ -56,6 +62,12 @@ html[data-theme="dark"] {
   --c-notes: #efe7d6;
   --c-habit: #f06595;
   --c-manga: #22b8cf;
+  --c-cali: #cc5de8;
+  --tier-1: #51cf66;
+  --tier-2: #4dabf7;
+  --tier-3: #ffa94d;
+  --tier-4: #ff6b6b;
+  --tier-5: #cc5de8;
 
   --cat-0: #8f8676;
   --cat-1: #3987e5;
@@ -1598,6 +1610,105 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 }
 .review-empty { margin-top: 12px; }
 
+/* ===================== Callisthénie ===================== */
+
+.cali-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.cali-svg .cg-ground { fill: color-mix(in srgb, var(--ink) 10%, transparent); }
+.cali-svg .cg-line { stroke: var(--ink); stroke-width: 2.4; }
+.cali-svg .cg-wall { fill: color-mix(in srgb, var(--ink) 12%, transparent); }
+.cali-svg .cg-bar { stroke: var(--muted); stroke-width: 4.5; stroke-linecap: round; }
+.cali-svg .cg-gear { fill: none; stroke: var(--muted); stroke-width: 3.5; stroke-linejoin: round; stroke-linecap: round; }
+.cali-svg polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.cali-svg .cf-torso { stroke: var(--ink); stroke-width: 11; }
+.cali-svg .cf-limb { stroke: var(--ink); stroke-width: 7.5; }
+.cali-svg .cf-back { stroke: color-mix(in srgb, var(--ink) 38%, var(--card)); stroke-width: 7; }
+.cali-svg .cf-head { fill: var(--ink); }
+.cali-svg .cf-eye { fill: var(--card); }
+.cali-svg .cf-shadow polyline { stroke: var(--tier, var(--red)); }
+.cali-svg .cf-shadow circle { fill: var(--tier, var(--red)); }
+.cali-svg .cf-motion { fill: none; stroke: var(--tier, var(--red)); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+
+.cali-stats { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 18px; }
+.cali-next { margin: 0; font-size: 13.5px; font-weight: 700; color: var(--ink-soft); }
+.tiers { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.tier {
+  border: 2.5px solid var(--ink);
+  border-radius: 10px;
+  background: var(--card);
+  overflow: hidden;
+}
+.tier > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  list-style: none;
+  cursor: pointer;
+  background-image: radial-gradient(color-mix(in srgb, var(--tier) 35%, transparent) 1.3px, transparent 1.6px);
+  background-size: 8px 8px;
+}
+.tier > summary::-webkit-details-marker { display: none; }
+.tier > summary::after { content: '▾'; margin-left: 4px; font-weight: 900; transition: transform .2s; }
+.tier:not([open]) > summary::after { transform: rotate(-90deg); }
+.tier[open] > summary { border-bottom: 2.5px solid var(--ink); }
+.tier-n {
+  padding: 3px 8px 4px;
+  background: var(--tier);
+  color: #fff;
+  font: 900 12px/1 var(--f-body);
+  border-radius: 6px;
+  transform: rotate(-3deg);
+}
+.tier > summary b { font-family: var(--f-title); font-weight: 400; font-size: 16px; }
+.tier > summary .jp { color: var(--tier); font-family: var(--f-title); font-size: 13px; }
+.tier-count { margin-left: auto; font-family: var(--f-title); font-size: 14px; }
+.tier-count.full { color: var(--tier); }
+
+.skill-list { display: flex; flex-direction: column; }
+.skill {
+  position: relative;
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 2px dashed color-mix(in srgb, var(--ink) 22%, transparent);
+}
+.skill:last-child { border-bottom: 0; }
+.skill-img {
+  align-self: start;
+  padding: 4px;
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.skill.done .skill-img { background: color-mix(in srgb, var(--tier) 14%, var(--paper)); }
+.skill.work .skill-img { border-color: var(--tier); box-shadow: 3px 3px 0 var(--tier); }
+.skill-title { display: flex; align-items: center; gap: 8px; }
+.skill-num {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--card);
+  font: 900 11px/1 var(--f-body);
+}
+.skill.done .skill-num { background: var(--tier); color: #fff; }
+.skill-title b { font-size: 15.5px; font-weight: 900; line-height: 1.15; }
+.skill-en { display: block; margin-top: 2px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.skill-goal { margin: 6px 0 2px; font-size: 13px; font-weight: 700; }
+.skill-tip { font-size: 12.5px; }
+.skill-tip summary { cursor: pointer; font-weight: 900; color: var(--tier); width: max-content; }
+.skill-tip p { margin: 4px 0 0; color: var(--ink-soft); font-weight: 500; line-height: 1.4; }
+.skill-rec { width: 100%; margin-top: 6px; font-size: 13px; font-weight: 700; }
+.skill-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.skill-actions .btn.on { background: var(--tier); color: #fff; }
+.skill-actions .btn.primary { box-shadow: 2px 2px 0 var(--tier); }
+.skill-date { font-size: 12.5px; font-weight: 900; color: var(--tier); }
+.skill .hanko { top: 8px; right: 10px; border-color: var(--tier); color: var(--tier); box-shadow: inset 0 0 0 3px var(--card), inset 0 0 0 5px var(--tier); }
+
 /* Montée de niveau */
 .mega-in .lv { display: block; margin-top: 6px; font-family: var(--f-title); font-size: 26px; }
 .mega-in .new-rank { display: block; margin-top: 8px; font-size: 16px; }
@@ -1874,6 +1985,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
   .streak { flex: 1 1 0; min-width: 0; }
   .hud-chip { flex: 0 0 auto; }
   .hg-row { grid-template-columns: 110px repeat(var(--days), 20px) 74px; }
+  .skill { grid-template-columns: 104px minmax(0, 1fr); gap: 10px; padding: 10px; }
   .habit-today { grid-template-columns: 1fr 1fr; }
   .quest-list { grid-template-columns: 1fr; }
   .cover { width: 54px; }
