@@ -1,0 +1,106 @@
+<!doctype html>
+<!-- Source du logo : les PNG du dossier icons/ sont générés par cette page (fonction drawLogo). -->
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Logo Mes Objectifs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&display=block" rel="stylesheet">
+<style>
+  body { margin: 0; padding: 24px; background: #ddd6c8; display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; font-family: sans-serif; }
+  canvas { display: block; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+  .round { border-radius: 22%; }
+  .circle { border-radius: 50%; }
+</style>
+</head>
+<body>
+<canvas id="big" width="512" height="512" style="width:256px;height:256px"></canvas>
+<canvas id="r" width="512" height="512" class="round" style="width:120px;height:120px"></canvas>
+<canvas id="c" width="512" height="512" class="circle" style="width:120px;height:120px"></canvas>
+<canvas id="s" width="512" height="512" class="round" style="width:48px;height:48px"></canvas>
+<script>
+  const INK = '#17130e', RED = '#e0352b', PAPER = '#f3ede1', CARD = '#fffdf7';
+
+  // Dessine le logo sur un canvas de taille "size" (dessin prévu pour 512 x 512)
+  function drawLogo(canvas, size) {
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.save();
+    ctx.scale(size / 512, size / 512);
+
+    // papier
+    ctx.fillStyle = PAPER;
+    ctx.fillRect(0, 0, 512, 512);
+
+    // lignes de vitesse autour du centre
+    ctx.save();
+    ctx.strokeStyle = INK;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 72; i++) {
+      const a = (i / 72) * Math.PI * 2 + (i % 3) * 0.02;
+      const r1 = 175 + (i % 4) * 16, r2 = 390;
+      ctx.globalAlpha = 0.13;
+      ctx.lineWidth = i % 2 ? 3 : 6;
+      ctx.beginPath();
+      ctx.moveTo(256 + Math.cos(a) * r1, 240 + Math.sin(a) * r1);
+      ctx.lineTo(256 + Math.cos(a) * r2, 240 + Math.sin(a) * r2);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // trames de points (coin haut droit et bas gauche)
+    const dots = (cx, cy, radius, maxA) => {
+      ctx.fillStyle = INK;
+      for (let y = 7.5; y < 512; y += 15) {
+        for (let x = 7.5; x < 512; x += 15) {
+          const d = Math.hypot(x - cx, y - cy) / radius;
+          if (d >= 1) continue;
+          ctx.globalAlpha = maxA * (1 - d);
+          ctx.beginPath();
+          ctx.arc(x, y, 2.8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      ctx.globalAlpha = 1;
+    };
+    dots(512, 0, 330, 0.30);
+    dots(0, 512, 260, 0.22);
+
+    // 月 (mois) avec l'ombre rouge décalée, comme le titre du site
+    ctx.font = "290px 'Dela Gothic One'";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = RED;
+    ctx.fillText('月', 248 + 13, 350 + 13);
+    ctx.fillStyle = INK;
+    ctx.fillText('月', 248, 350);
+
+    // tampon 済 (= fait)
+    ctx.save();
+    ctx.translate(352, 352);
+    ctx.rotate(-14 * Math.PI / 180);
+    ctx.beginPath(); ctx.arc(0, 0, 66, 0, Math.PI * 2);
+    ctx.fillStyle = CARD; ctx.fill();
+    ctx.lineWidth = 9; ctx.strokeStyle = RED; ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 51, 0, Math.PI * 2);
+    ctx.lineWidth = 3.5; ctx.stroke();
+    ctx.font = "62px 'Dela Gothic One'";
+    ctx.fillStyle = RED;
+    ctx.fillText('済', 0, 23);
+    ctx.restore();
+
+    ctx.restore();
+    return canvas;
+  }
+
+  window.logoReady = document.fonts.load("290px 'Dela Gothic One'", '月済').then(() => {
+    ['big', 'r', 'c', 's'].forEach(id => drawLogo(document.getElementById(id), 512));
+    return true;
+  });
+
+  // Génère un PNG (data URL) à la taille demandée
+  window.logoPNG = size => drawLogo(document.createElement('canvas'), size).toDataURL('image/png');
+</script>
+</body>
+</html>

@@ -4,6 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mes Objectifs du Mois</title>
+  <meta name="description" content="Mes objectifs du mois : animes, sourates, salle, argent.">
+  <meta name="theme-color" content="#17130e">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icons/favicon-64.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Objectifs">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Reem+Kufi:wght@700&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap" rel="stylesheet">
@@ -34,10 +43,31 @@
       </div>
     </header>
 
+    <!-- ===== Rang (XP) et série ===== -->
+    <div class="hud">
+      <button class="rank" data-act="bilan-open" title="Voir ton bilan et d'où vient ton XP">
+        <span class="rank-lvl"><small>NIV.</small><b id="rankLvl">0</b></span>
+        <span class="rank-info">
+          <span class="rank-name" id="rankName">Débutant</span>
+          <span class="xp-bar"><i id="rankBar"></i></span>
+          <small id="rankXp">0 / 100 XP</small>
+        </span>
+      </button>
+      <div class="streak" id="streak">
+        <svg class="flame" viewBox="0 0 24 24" aria-hidden="true">
+          <path class="fl-out" d="M12 1.5c.6 3.2-1.8 5-1.6 7.6.9-.6 1.6-1.7 1.8-2.9 2.7 2.1 5.8 5.2 5.8 9.1A6 6 0 0 1 6 15.6c0-2.6 1.3-4.2 2.6-5.6.1 1.2.6 2.2 1.4 2.7C9.6 8.9 10.4 4.6 12 1.5z"/>
+          <path class="fl-in" d="M12 11.5c1.6 1.4 3 2.9 3 4.8a3 3 0 0 1-6 0c0-1.2.6-2.1 1.3-2.8.2.6.5 1 1 1.2-.2-1.2 0-2.3.7-3.2z"/>
+        </svg>
+        <span id="streakTxt"></span>
+      </div>
+    </div>
+
     <!-- ===== Barre d'outils ===== -->
     <nav class="toolbar">
       <button class="btn" data-act="today" id="todayBtn" hidden>↺ Revenir à ce mois</button>
       <button class="btn" data-act="copy" id="copyBtn">Reprendre le mois dernier</button>
+      <button class="btn bilan-btn" data-act="bilan-open">Bilan</button>
+      <button class="btn install-btn" data-act="install" id="installBtn" hidden>Installer l'appli</button>
       <span class="spacer"></span>
       <span class="saved-tag" id="savedTag" title="Chaque changement est enregistré tout seul dans ce navigateur">Enregistré automatiquement</span>
       <button class="btn sync-btn" data-act="sync-open" id="syncBtn" data-state="off">Synchro tél ↔ PC</button>
@@ -125,6 +155,20 @@
       <div class="modal-body" id="syncBody"></div>
     </div>
   </div>
+
+  <!-- Page Bilan -->
+  <div class="modal" id="bilanModal" hidden role="dialog" aria-modal="true" aria-labelledby="bilanTitle">
+    <div class="modal-card wide" style="--accent: var(--c-anime)">
+      <header class="panel-head">
+        <h2 id="bilanTitle">Bilan</h2>
+        <span class="sfx">まとめ</span>
+        <button type="button" class="x" data-act="modal-close" aria-label="Fermer">×</button>
+      </header>
+      <div class="modal-body" id="bilanBody"></div>
+    </div>
+  </div>
+
+  <div class="viz-tip" id="vizTip" hidden></div>
 
   <div class="toast" id="toast" role="status" aria-live="polite">
     <span class="toast-msg"></span>

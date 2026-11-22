@@ -5,8 +5,11 @@ Un petit site au style manga pour noter mes objectifs chaque mois :
 - **Animes** : où j'en suis et jusqu'à quel épisode je veux aller
 - **Sourates** : combien j'en apprends ce mois-ci, et le total sur 114
 - **Salle** : les séances (calendrier) et mes objectifs de perf
-- **Argent** : épargne, dépenses, budget et cagnottes
+- **Argent** : épargne, dépenses par catégorie (camembert), budget, abonnements ajoutés tout seuls chaque mois, cagnottes
 - **Autres objectifs** et **notes du mois**
+- **Animes** : affiches, nombre d'épisodes et dates de sortie récupérés sur AniList, planning de la semaine, liste « à regarder plus tard », note sur 10
+- **Rang RPG** (XP et niveaux), **séries** 🔥 et une page **Bilan** avec les graphiques mois par mois
+- **Appli** : installable sur l'écran d'accueil du téléphone (logo dans `icons/`, source dans `icons/logo.html`), marche sans internet
 
 Tout est enregistré dans le navigateur (localStorage).
 Le bouton « Sauvegarder un fichier » télécharge une copie de secours, et « Charger » la remet.
