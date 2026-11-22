@@ -13,7 +13,13 @@ Un petit site au style manga pour noter mes objectifs chaque mois :
 - **Révision des sourates** : celles pas révisées depuis le plus longtemps sont proposées en premier
 - **Mangas** : chapitres, couvertures et parution via AniList
 - **Quêtes de la semaine** (3 par semaine, +40 XP) et **29 succès** à débloquer
-- **Callisthénie** : 24 figures dessinées (de la suspension à l'équilibre sur un bras), rangées en 5 niveaux, avec objectif, conseil et record (`cali.js`)
+- **Callisthénie** : 24 figures dessinées (de la suspension à l'équilibre sur un bras), rangées en 5 niveaux, avec objectif, conseil, record et chrono (`cali.js`)
+- **Salle** : minuteur de repos, séances types à cocher série par série, courbes du poids et des charges
+- **Humeur du jour** (kaomoji) et **sommeil**
+- **Études** : minuteur de révision (25 min + pause), temps d'étude, livres avec couverture (Open Library)
+- **Comptes à rebours**, **carte de l'année** et **image du mois** à partager
+- **Réglages** : 5 thèmes de couleurs, mode nuit, code secret, sauvegarde
+- Aucun son : les minuteurs préviennent seulement à l'écran
 - **Appli** : installable sur l'écran d'accueil du téléphone (logo dans `icons/`, source dans `icons/logo.html`), marche sans internet
 
 Tout est enregistré dans le navigateur (localStorage).

@@ -79,8 +79,44 @@
     mangaGoal: 20,    // objectif de chapitres du mois atteint
     mangaDone: 50,    // manga terminé
     quest: 40,        // quête de la semaine réussie
-    skillTier: 30     // figure de callisthénie réussie : 30 XP × son niveau (30 à 150)
+    skillTier: 30,    // figure de callisthénie réussie : 30 XP × son niveau (30 à 150)
+    workout: 20,      // séance type terminée
+    per10pages: 1,    // 1 XP par tranche de 10 pages lues
+    bookDone: 50,     // livre fini
+    per10min: 1,      // 1 XP par tranche de 10 min de révision
+    mood: 2,          // humeur notée
+    sleep: 2          // nuit notée
   };
+
+  // Réglages propres à cet appareil (jamais synchronisés)
+  const LOCK_KEY = 'mes-objectifs-code';        // empreinte du code secret
+  const TIMER_KEY = 'mes-objectifs-minuteur';   // minuteur en cours
+  const SESSION_KEY = 'mes-objectifs-seance';   // séance type en cours
+  const PREFS_KEY = 'mes-objectifs-reglages';   // repos par défaut, etc.
+
+  const PALETTES = [
+    { id: 'classique', name: 'Classique', colors: ['#f3ede1', '#17130e', '#e0352b'] },
+    { id: 'sakura', name: 'Sakura', colors: ['#fbeef1', '#2b1a20', '#e64980'] },
+    { id: 'shonen', name: 'Shōnen', colors: ['#fff3dc', '#1a1208', '#ff4b1f'] },
+    { id: 'seinen', name: 'Seinen', colors: ['#ecebe8', '#111111', '#5c5c5c'] },
+    { id: 'ocean', name: 'Océan', colors: ['#e9f3f4', '#0d1b24', '#1c7ed6'] }
+  ];
+
+  const MOODS = [
+    { v: 1, face: '(╥﹏╥)', name: 'Très mal' },
+    { v: 2, face: '(︶︹︺)', name: 'Pas top' },
+    { v: 3, face: '(・_・)', name: 'Bof' },
+    { v: 4, face: '(^‿^)', name: 'Bien' },
+    { v: 5, face: '(≧▽≦)', name: 'Super' }
+  ];
+
+  // Séances proposées (on peut les modifier ensuite)
+  const WORKOUT_TEMPLATES = [
+    { name: 'Push (pecs, épaules, triceps)', ex: [['Pompes', 4, '12'], ['Dips', 3, '10'], ['Développé militaire', 3, '10'], ['Pompes diamant', 3, '10']] },
+    { name: 'Pull (dos, biceps)', ex: [['Tractions', 4, '6'], ['Rowing', 3, '10'], ['Tractions australiennes', 3, '12'], ['Curl biceps', 3, '12']] },
+    { name: 'Jambes', ex: [['Squats', 4, '15'], ['Fentes', 3, '12'], ['Pistol squat assisté', 3, '6'], ['Mollets', 4, '20']] },
+    { name: 'Full body callisthénie', ex: [['Tractions', 3, '5'], ['Dips', 3, '8'], ['Pompes', 3, '12'], ['Squats', 3, '15'], ['L-sit', 3, '10 s']] }
+  ];
   const CALI = window.CALI || { TIERS: [], SKILLS: [], svg: () => '' };
 
   // Animes et mangas partagent le même affichage
@@ -192,6 +228,17 @@
     s.quran.learnedOn = (s.quran.learnedOn && typeof s.quran.learnedOn === 'object') ? s.quran.learnedOn : {};
     s.questWeeks = (s.questWeeks && typeof s.questWeeks === 'object') ? s.questWeeks : {};   // quêtes tirées pour chaque semaine
     s.cali = (s.cali && typeof s.cali === 'object') ? s.cali : {};   // figure → { s: 'work' | 'done', rec, at }
+    const obj = v => (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+    const arr = v => Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : [];
+    s.weights = obj(s.weights);         // date → poids (kg)
+    s.liftLog = obj(s.liftLog);         // exercice → { date → valeur }
+    s.workouts = arr(s.workouts);       // séances types
+    s.workoutLog = arr(s.workoutLog);   // { date, wid, name }
+    s.mood = obj(s.mood);               // date → 1..5
+    s.sleep = obj(s.sleep);             // date du réveil → { bed, wake }
+    s.books = arr(s.books);
+    s.study = obj(s.study);             // date → minutes de révision
+    s.countdowns = arr(s.countdowns);
     return s;
   }
 
@@ -369,18 +416,17 @@
     $('#todayBtn').hidden = current === nowKey;
     const prev = state.months[shiftKey(current, -1)];
     $('#copyBtn').classList.toggle('pulse', isEmpty(mo) && !isEmpty(prev));
-    $('#themeBtn').textContent = document.documentElement.dataset.theme === 'dark' ? 'Mode jour' : 'Mode nuit';
-
     if (lastGlobal !== null && lastGlobal < 100 && pct === 100) megaCelebration();
     lastGlobal = pct;
     renderHud();
     renderQuests();
+    renderCountdowns();
     updateInstallBtn();
   }
 
   /* ---------- Animes ---------- */
-  const picked = { anime: null, watch: null, manga: null };   // choisi dans la liste de suggestions
-  const suggResults = { anime: [], watch: [], manga: [] };
+  const picked = { anime: null, watch: null, manga: null, book: null };   // choisi dans la liste de suggestions
+  const suggResults = { anime: [], watch: [], manga: [], book: [] };
   let suggTimer = 0;
   let pendingAnimeRender = false;
 
@@ -600,6 +646,130 @@
     afterRender();
   }
 
+  /* ---------- Études : révision et livres ---------- */
+  const OPENLIB = 'https://openlibrary.org/search.json';
+  const olCache = new Map();
+
+  async function olSearch(text) {
+    const k = norm(text);
+    if (olCache.has(k)) return olCache.get(k);
+    const url = `${OPENLIB}?q=${encodeURIComponent(text)}&limit=6&fields=key,title,author_name,cover_i,number_of_pages_median,first_publish_year`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error('Open Library ' + res.status);
+    const j = await res.json();
+    const list = (j.docs || []).map(d => ({
+      title: d.title || '',
+      author: (d.author_name || []).slice(0, 2).join(', '),
+      cover: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg` : '',
+      pages: d.number_of_pages_median || 0,
+      year: d.first_publish_year || null
+    }));
+    olCache.set(k, list);
+    return list;
+  }
+
+  function studyStats() {
+    const today = dateKey(new Date());
+    const week = weekDates(mondayKey(new Date()));
+    const monthPrefix = keyOf(new Date());
+    let w = 0, m = 0;
+    Object.entries(state.study).forEach(([d, v]) => {
+      if (week.includes(d)) w += v;
+      if (d.startsWith(monthPrefix)) m += v;
+    });
+    return { today: state.study[today] || 0, week: w, month: m };
+  }
+  const hmin = m => (m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}` : `${m} min`);
+
+  function bookCard(b) {
+    const p = b.pages ? clamp01(b.page / b.pages) : 0;
+    const done = b.status === 'done';
+    const st = [['todo', 'À lire'], ['reading', 'En cours'], ['done', 'Fini']];
+    return `
+      <div class="book card ${done ? 'is-done' : ''} ${added.has(b.id) ? 'is-new' : ''}" data-book="${b.id}">
+        <div class="anime-row">
+          ${coverImg(b, b.title)}
+          <div class="anime-main">
+            <div class="anime-top">
+              <input class="ghost name" data-act="book-title" value="${esc(b.title)}" aria-label="Titre" maxlength="100">
+              <button type="button" class="x" data-act="book-del" aria-label="Supprimer ${esc(b.title)}" title="Supprimer">×</button>
+            </div>
+            ${b.author ? `<p class="air">${esc(b.author)}</p>` : ''}
+            <div class="seg book-seg" role="group" aria-label="Où tu en es">${st.map(([v, l]) =>
+              `<button type="button" data-act="book-status" data-v="${v}" class="${b.status === v ? 'on' : ''}">${l}</button>`).join('')}</div>
+            ${b.status !== 'todo' ? `
+              <div class="book-pages">
+                <span>Page</span>
+                <input class="num-in" type="number" min="0" inputmode="numeric" data-act="book-page" value="${b.page || 0}" aria-label="Page actuelle">
+                <span>/</span>
+                <input class="num-in" type="number" min="0" inputmode="numeric" data-act="book-total" value="${b.pages || ''}" placeholder="?" aria-label="Nombre de pages">
+                ${!done ? '<button type="button" class="btn sm" data-act="book-plus" data-v="10">+10 p.</button>' : ''}
+              </div>` : ''}
+          </div>
+        </div>
+        ${b.status !== 'todo' && b.pages ? bar('book-' + b.id, p, 'thin') : ''}
+        ${done ? `
+          <div class="rating" role="group" aria-label="Ta note sur 10">
+            <span>Ta note :</span>
+            ${Array.from({ length: 10 }, (_, i) => i + 1).map(n =>
+              `<button type="button" class="${b.rating >= n ? 'on' : ''}" data-act="book-rate" data-v="${n}" aria-label="${n} sur 10">${n}</button>`).join('')}
+            ${b.rating ? `<b>${b.rating}/10</b>` : ''}
+          </div>` : ''}
+        ${done ? `<span class="hanko sm ${fresh.has('b' + b.id) ? 'fresh' : ''}" aria-hidden="true">済</span>` : ''}
+      </div>`;
+  }
+
+  function renderStudy() {
+    const s = studyStats();
+    // Les 7 derniers jours en petites barres
+    const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() - 6 + i); return d; });
+    const vals = days.map(d => state.study[dateKey(d)] || 0);
+    const mx = Math.max(30, ...vals);
+    const bars7 = `
+      <div class="mini-bars viz" aria-label="Révision des 7 derniers jours">${days.map((d, i) => `
+        <div class="mb" data-tip="${JOURS[d.getDay()]} ${d.getDate()} : ${hmin(vals[i])}">
+          <i style="height:${Math.max(vals[i] ? 6 : 0, (vals[i] / mx) * 100)}%"></i>
+          <small>${JOURS[d.getDay()].charAt(0).toUpperCase()}</small>
+        </div>`).join('')}
+      </div>`;
+
+    const order = { reading: 0, todo: 1, done: 2 };
+    const books = state.books.slice().sort((a, b) => order[a.status] - order[b.status]);
+    const active = books.filter(b => b.status !== 'done');
+    const finished = books.filter(b => b.status === 'done');
+
+    $('#studyBody').innerHTML = `
+      <div class="study-btns">
+        <button type="button" class="btn primary" data-act="study-start" data-v="25">Réviser 25 min</button>
+        <button type="button" class="btn" data-act="study-start" data-v="50">50 min</button>
+        <button type="button" class="btn" data-act="break-start" data-v="5">Pause 5 min</button>
+      </div>
+      <div class="study-stats">
+        <div><b>${hmin(s.today)}</b><small>aujourd'hui</small></div>
+        <div><b>${hmin(s.week)}</b><small>cette semaine</small></div>
+        <div><b>${hmin(s.month)}</b><small>ce mois</small></div>
+      </div>
+      ${bars7}
+      <form class="add" data-form="study" autocomplete="off">
+        <label class="day-lbl">J'ai révisé <input name="min" type="number" min="1" max="600" inputmode="numeric" placeholder="30"> min</label>
+        <button class="btn" type="submit">Ajouter</button>
+      </form>
+      <p class="hint">Le minuteur s'affiche en bas de l'écran. Les minutes faites comptent même si tu arrêtes avant la fin.</p>
+
+      <h3 class="sub">Livres</h3>
+      ${active.length ? `<div class="stack">${active.map(bookCard).join('')}</div>`
+        : '<p class="empty-line">Ajoute un livre : tape le titre et choisis-le, la couverture et le nombre de pages arrivent tout seuls.</p>'}
+      <form class="add" data-form="book" autocomplete="off">
+        ${suggestField('book', 'Titre du livre')}
+        <button class="btn primary" type="submit">Ajouter</button>
+      </form>
+      ${finished.length ? `
+        <details class="done-books">
+          <summary>Livres finis (${finished.length})</summary>
+          <div class="stack">${finished.map(bookCard).join('')}</div>
+        </details>` : ''}`;
+  }
+
   /* ---------- Mangas ---------- */
   function renderManga() {
     const m = M();
@@ -643,6 +813,7 @@
             <details class="skill-tip"><summary>Conseil</summary><p>${esc(s.tip)}</p></details>
             <input class="ghost skill-rec" data-act="skill-rec" value="${esc(x.rec || '')}" placeholder="Ton record (ex : 6 s, 3 reps)" maxlength="30" aria-label="Ton record">
             <div class="skill-actions">
+              ${goalSeconds(s) ? '<button type="button" class="btn sm" data-act="skill-chrono">Chrono</button>' : ''}
               ${isDone
                 ? `<span class="skill-date">Réussi le ${fmtDay(x.at)}</span><button type="button" class="btn sm" data-act="skill-undo">Annuler</button>`
                 : `<button type="button" class="btn sm ${isWork ? 'on' : ''}" data-act="skill-work" aria-pressed="${isWork}">${isWork ? 'En cours ✓' : 'Je travaille'}</button>
@@ -721,6 +892,63 @@
     }
   }
 
+  /* ---------- Humeur et sommeil ---------- */
+  function sleepMinutes(s) {
+    if (!s || !s.bed || !s.wake) return 0;
+    const [bh, bm] = s.bed.split(':').map(Number);
+    const [wh, wm] = s.wake.split(':').map(Number);
+    let m = (wh * 60 + wm) - (bh * 60 + bm);
+    if (m <= 0) m += 1440;
+    return m;
+  }
+  const hm = m => `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
+
+  function moodSleepHtml() {
+    const today = dateKey(new Date());
+    const mood = state.mood[today] || 0;
+    const sl = state.sleep[today] || {};
+    const d = new Date();
+    const mins = [];
+    for (let i = 0; i < 7; i++) { const v = sleepMinutes(state.sleep[dateKey(d)]); if (v) mins.push(v); d.setDate(d.getDate() - 1); }
+    const avg7 = mins.length ? Math.round(avg(mins)) : 0;
+    const dur = sleepMinutes(sl);
+    return `
+      <div class="daycheck">
+        <div class="dc-block">
+          <span class="dc-label">Humeur du jour</span>
+          <div class="moods">${MOODS.map(m => `<button type="button" class="mood ${mood === m.v ? 'on' : ''}" data-act="mood" data-v="${m.v}" title="${m.name}" aria-label="${m.name}" aria-pressed="${mood === m.v}">${m.face}</button>`).join('')}</div>
+        </div>
+        <div class="dc-block">
+          <span class="dc-label">Nuit dernière</span>
+          <div class="sleep-row">
+            <label>Couché <input type="time" data-act="sleep-bed" value="${esc(sl.bed || '')}"></label>
+            <label>Levé <input type="time" data-act="sleep-wake" value="${esc(sl.wake || '')}"></label>
+            <b class="sleep-dur ${dur && dur < 360 ? 'short' : ''}">${dur ? hm(dur) : '—'}</b>
+          </div>
+          ${avg7 ? `<small class="hint">Moyenne sur 7 nuits : <b>${hm(avg7)}</b></small>` : ''}
+        </div>
+      </div>`;
+  }
+
+  // Lignes « Humeur » et « Sommeil » au-dessus des habitudes dans la grille du mois
+  function moodSleepRows(dim, isNow, today, nowKey) {
+    const dk = d => `${current}-${String(d).padStart(2, '0')}`;
+    const has = Array.from({ length: dim }, (_, i) => dk(i + 1)).some(k => state.mood[k] || state.sleep[k]);
+    if (!has) return '';
+    const moodCells = Array.from({ length: dim }, (_, i) => {
+      const v = state.mood[dk(i + 1)] || 0;
+      const f = v ? MOODS[v - 1] : null;
+      return `<span class="hg-cell mood-cell ${v ? 'm' + v : ''} ${isNow && i + 1 === today ? 'today' : ''}" title="${i + 1} : ${f ? f.name : 'pas noté'}"></span>`;
+    }).join('');
+    const sleepCells = Array.from({ length: dim }, (_, i) => {
+      const m = sleepMinutes(state.sleep[dk(i + 1)]);
+      return `<span class="hg-cell sleep-cell ${m ? (m < 360 ? 'short' : 'ok') : ''} ${isNow && i + 1 === today ? 'today' : ''}" title="${i + 1} : ${m ? hm(m) : 'pas noté'}">${m ? Math.round(m / 60) : ''}</span>`;
+    }).join('');
+    return `
+      <div class="hg-row hg-extra"><span class="hg-name"><b>Humeur</b></span>${moodCells}<span class="hg-stat"></span></div>
+      <div class="hg-row hg-extra"><span class="hg-name"><b>Sommeil (h)</b></span>${sleepCells}<span class="hg-stat"></span></div>`;
+  }
+
   function drawHabits() {
     const m = M();
     const { y, m: mon } = partsOf(current);
@@ -732,8 +960,10 @@
     const days = elapsedDays(current);
     const ideasLeft = HABIT_IDEAS.map((h, i) => ({ h, i })).filter(({ h }) => !state.habits.some(x => x.name === h.name));
 
+    const daycheck = isNow ? moodSleepHtml() : '';
+
     if (!state.habits.length) {
-      $('#habitBody').innerHTML =
+      $('#habitBody').innerHTML = daycheck +
         emptyBox('Aucune habitude pour le moment.', 'Ce sont les petits trucs à faire tous les jours. Choisis-en dans la liste ou crée la tienne.') + `
         <div class="habit-ideas">${HABIT_IDEAS.map((h, i) =>
           `<button type="button" class="btn sm" data-act="habit-idea" data-i="${i}">+ ${esc(h.name)}${h.target > 1 ? ` (${h.target} fois)` : ''}</button>`).join('')}</div>
@@ -788,9 +1018,10 @@
     }).join('');
 
     $('#habitBody').innerHTML = `
+      ${daycheck}
       ${todayHtml}
       <h3 class="sub">${isNow ? 'Le mois' : 'Le mois en cases'}</h3>
-      <div class="hg-scroll"><div class="hg" style="--days:${dim}">${head}${rows}</div></div>
+      <div class="hg-scroll"><div class="hg" style="--days:${dim}">${head}${moodSleepRows(dim, isNow, today, nowKey)}${rows}</div></div>
       <p class="hint">Clique sur une case pour cocher ou décocher un jour. Le nombre à droite = jours réussis.</p>
       ${habitForm()}
       ${ideasLeft.length ? `<div class="habit-ideas">${ideasLeft.map(({ h, i }) =>
@@ -972,6 +1203,13 @@
       ${gymStreakHtml()}
       <div class="cal">${cal}</div>
       ${bar('gym-' + current, sp)}
+      <div class="rest-row">
+        <span>Minuteur de repos :</span>
+        ${[60, 90, 120, 180].map(s => `<button type="button" class="btn sm" data-act="rest-start" data-v="${s}">${s < 120 ? s + ' s' : s / 60 + ' min'}</button>`).join('')}
+      </div>
+
+      <h3 class="sub">Mes séances</h3>
+      ${workoutsHtml()}
 
       <h3 class="sub">Objectifs de perf</h3>
       ${lifts ? `<div class="stack">${lifts}</div>`
@@ -982,7 +1220,174 @@
         <input name="target" type="number" step="any" placeholder="Objectif">
         <input name="unit" placeholder="kg, reps…" value="kg" maxlength="10">
         <button class="btn primary" type="submit">Ajouter</button>
-      </form>`;
+      </form>
+      ${liftChartHtml()}
+      ${weightHtml()}`;
+  }
+
+  /* ---------- Séances types ---------- */
+  let editingWorkout = null;
+  let liftChartSel = '';
+
+  function loadSession() {
+    try { const s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); return s && s.wid ? s : null; }
+    catch (e) { return null; }
+  }
+  function saveSession(s) {
+    try { if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s)); else localStorage.removeItem(SESSION_KEY); }
+    catch (e) { /* rien */ }
+  }
+
+  function workoutsHtml() {
+    const session = loadSession();
+    const running = session && byId(state.workouts, session.wid);
+    const lastDone = wid => state.workoutLog.filter(x => x.wid === wid).map(x => x.date).sort().pop();
+    const cards = state.workouts.map(w => {
+      const editing = editingWorkout === w.id;
+      const last = lastDone(w.id);
+      const editor = `
+        <input class="ghost wk-name" data-act="wk-name" value="${esc(w.name)}" aria-label="Nom de la séance" maxlength="40">
+        <div class="wk-edit">${w.ex.map(e => `
+          <div class="wk-ex" data-ex="${e.id}">
+            <input class="ghost" data-act="wkex-name" value="${esc(e.name)}" aria-label="Exercice" maxlength="40">
+            <input class="num-in" type="number" min="1" max="20" inputmode="numeric" data-act="wkex-sets" value="${e.sets}" aria-label="Séries">
+            <span>×</span>
+            <input class="num-in" type="text" data-act="wkex-reps" value="${esc(e.reps)}" aria-label="Répétitions" maxlength="10">
+            <button type="button" class="x" data-act="wkex-del" aria-label="Enlever ${esc(e.name)}">×</button>
+          </div>`).join('')}
+        </div>
+        <button type="button" class="btn sm" data-act="wkex-add">+ Exercice</button>`;
+      return `
+        <div class="wk ${editing ? 'editing' : ''} ${added.has(w.id) ? 'is-new' : ''}" data-wid="${w.id}">
+          ${editing ? editor : `
+            <div class="wk-top"><b>${esc(w.name)}</b><small>${w.ex.length} exercice${w.ex.length > 1 ? 's' : ''}${last ? ` · dernière fois : ${fmtDay(last)}` : ''}</small></div>
+            <p class="wk-list">${w.ex.map(e => `${esc(e.name)} <b>${e.sets}×${esc(e.reps)}</b>`).join(' · ') || 'Aucun exercice'}</p>`}
+          <div class="wk-actions">
+            <button type="button" class="btn sm primary" data-act="wk-start">${running && running.id === w.id ? 'Reprendre' : 'Commencer'}</button>
+            <button type="button" class="btn sm" data-act="wk-edit">${editing ? 'Fini' : 'Modifier'}</button>
+            <button type="button" class="x" data-act="wk-del" aria-label="Supprimer ${esc(w.name)}" title="Supprimer">×</button>
+          </div>
+        </div>`;
+    }).join('');
+    const ideas = WORKOUT_TEMPLATES.map((t, i) => ({ t, i })).filter(({ t }) => !state.workouts.some(w => w.name === t.name));
+    return `
+      ${running ? `<p class="wk-running">Séance en cours : <b>${esc(running.name)}</b> <button type="button" class="btn sm primary" data-act="wk-start" data-wid="${running.id}">Reprendre</button></p>` : ''}
+      ${cards ? `<div class="stack">${cards}</div>` : '<p class="empty-line">Une séance type = ta liste d\'exercices (séries × répétitions). Tu la lances, tu coches chaque série, et le repos se lance tout seul.</p>'}
+      <div class="habit-ideas">
+        ${ideas.map(({ t, i }) => `<button type="button" class="btn sm" data-act="wk-template" data-i="${i}">+ ${esc(t.name)}</button>`).join('')}
+        <button type="button" class="btn sm" data-act="wk-new">+ Séance vide</button>
+      </div>`;
+  }
+
+  function renderWorkout() {
+    const s = loadSession();
+    const w = s && byId(state.workouts, s.wid);
+    if (!w) { $('#workoutModal').hidden = true; return; }
+    const total = w.ex.reduce((t, e) => t + e.sets, 0);
+    const done = w.ex.reduce((t, e) => t + Math.min(e.sets, s.sets[e.id] || 0), 0);
+    $('#workoutTitle').textContent = w.name;
+    $('#workoutBody').innerHTML = `
+      <p class="hint">Coche chaque série quand tu l'as faite : le repos (${restSeconds()} s) se lance tout seul.</p>
+      ${bar('wk-run', total ? done / total : 0)}
+      <p class="wr-count"><b>${done}</b> / ${total} séries</p>
+      <div class="wk-run">${w.ex.map(e => {
+        const n = s.sets[e.id] || 0;
+        return `
+          <div class="wr-ex ${n >= e.sets ? 'full' : ''}" data-ex="${e.id}">
+            <div class="wr-name"><b>${esc(e.name)}</b><small>${e.sets} × ${esc(e.reps)}</small></div>
+            <div class="wr-sets">${Array.from({ length: e.sets }, (_, i) =>
+              `<button type="button" class="${i < n ? 'on' : ''}" data-act="wr-set" data-v="${i + 1}" aria-label="Série ${i + 1}">${i + 1}</button>`).join('')}</div>
+          </div>`;
+      }).join('')}</div>
+      <div class="sync-actions">
+        <button type="button" class="btn primary" data-act="wk-finish">Terminer la séance</button>
+        <button type="button" class="btn" data-act="wk-cancel">Abandonner</button>
+      </div>`;
+    afterRender();
+  }
+
+  /* ---------- Courbes : charges et poids ---------- */
+  function logLift(l) {
+    const k = norm(l.name) || l.id;
+    const entry = state.liftLog[k] || (state.liftLog[k] = { name: l.name, pts: {} });
+    entry.name = l.name;
+    entry.unit = l.unit;
+    entry.pts[dateKey(new Date())] = l.cur;
+  }
+
+  // Petit graphique en ligne. points = [{ d: 'AAAA-MM-JJ', v }]
+  function lineChart(points, { color = 'var(--accent)', unit = '', title = '' } = {}) {
+    if (!points.length) return '';
+    const W = 320, H = 150, L = 38, R = 14, T = 16, B = 22;
+    const iw = W - L - R, ih = H - T - B;
+    const ts = points.map(p => new Date(p.d + 'T12:00:00').getTime());
+    const t0 = Math.min(...ts), t1 = Math.max(...ts);
+    const vs = points.map(p => p.v);
+    let lo = Math.min(...vs), hi = Math.max(...vs);
+    if (lo === hi) { lo -= 1; hi += 1; }
+    const pad = (hi - lo) * 0.15;
+    lo -= pad; hi += pad;
+    const X = t => L + (t1 === t0 ? iw / 2 : ((t - t0) / (t1 - t0)) * iw);
+    const Y = v => T + ih - ((v - lo) / (hi - lo)) * ih;
+    const f = v => String(Math.round(v * 10) / 10).replace('.', ',');
+    let grid = '';
+    [lo, (lo + hi) / 2, hi].forEach((g, i) => {
+      grid += `<line class="grid${i === 0 ? ' base' : ''}" x1="${L}" x2="${W - R}" y1="${Y(g)}" y2="${Y(g)}"/>
+        <text class="tick" x="${L - 5}" y="${Y(g) + 3}" text-anchor="end">${f(g)}</text>`;
+    });
+    const path = points.map((p, i) => `${i ? 'L' : 'M'}${X(ts[i]).toFixed(1)},${Y(p.v).toFixed(1)}`).join(' ');
+    const dots = points.map((p, i) => `
+      <circle class="ln-dot" cx="${X(ts[i]).toFixed(1)}" cy="${Y(p.v).toFixed(1)}" r="3.5" style="fill:${color}"/>
+      <circle class="hit" cx="${X(ts[i]).toFixed(1)}" cy="${Y(p.v).toFixed(1)}" r="10" data-tip="${esc(fmtDay(p.d))} : ${f(p.v)}${esc(unit)}"/>`).join('');
+    const last = points[points.length - 1];
+    const lab = (d, x, anchor) => `<text class="tick" x="${x}" y="${H - 6}" text-anchor="${anchor}">${esc(fmtDay(d).replace(/ \d{4}$/, ''))}</text>`;
+    return `
+      <figure class="chart viz">
+        ${title ? `<figcaption>${esc(title)}</figcaption>` : ''}
+        <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title || 'Courbe')}">
+          ${grid}
+          <path class="ln" d="${path}" style="stroke:${color}"/>
+          ${dots}
+          <text class="val" x="${X(ts[ts.length - 1])}" y="${Y(last.v) - 8}" text-anchor="end">${f(last.v)}${esc(unit)}</text>
+          ${lab(points[0].d, L, 'start')}${points.length > 1 ? lab(last.d, W - R, 'end') : ''}
+        </svg>
+      </figure>`;
+  }
+
+  function liftChartHtml() {
+    const keys = Object.keys(state.liftLog).filter(k => Object.keys(state.liftLog[k].pts).length);
+    if (!keys.length) return '';
+    if (!keys.includes(liftChartSel)) liftChartSel = keys[0];
+    const e = state.liftLog[liftChartSel];
+    const pts = Object.keys(e.pts).sort().map(d => ({ d, v: e.pts[d] }));
+    return `
+      <h3 class="sub">Courbe de progression</h3>
+      ${keys.length > 1 ? `<select class="chart-select" data-act="lift-chart" aria-label="Exercice">${keys.map(k =>
+        `<option value="${esc(k)}" ${k === liftChartSel ? 'selected' : ''}>${esc(state.liftLog[k].name)}</option>`).join('')}</select>` : ''}
+      ${lineChart(pts, { color: 'var(--c-gym)', unit: e.unit ? ' ' + e.unit : '', title: e.name })}
+      ${pts.length < 2 ? '<p class="hint">La courbe se dessine quand tu changes ta valeur avec − / + au fil des jours.</p>' : ''}`;
+  }
+
+  function weightHtml() {
+    const today = dateKey(new Date());
+    const days = Object.keys(state.weights).sort();
+    const pts = days.slice(-60).map(d => ({ d, v: state.weights[d] }));
+    const f = v => String(Math.round(v * 10) / 10).replace('.', ',');
+    let diff = '';
+    if (days.length > 1) {
+      const d0 = state.weights[days[0]], d1 = state.weights[days[days.length - 1]];
+      const dv = Math.round((d1 - d0) * 10) / 10;
+      diff = ` · ${dv > 0 ? '+' : ''}${f(dv)} kg depuis le ${fmtDay(days[0])}`;
+    }
+    return `
+      <h3 class="sub">Poids du corps</h3>
+      <form class="add weight-form" data-form="weight" autocomplete="off">
+        <input name="kg" type="text" inputmode="decimal" placeholder="Ton poids aujourd'hui (kg)" value="${state.weights[today] ? f(state.weights[today]) : ''}" required maxlength="6" aria-label="Poids en kg">
+        <button class="btn primary" type="submit">Noter</button>
+      </form>
+      ${days.length
+        ? `<p class="hint">Dernier : <b>${f(state.weights[days[days.length - 1]])} kg</b>${diff}</p>${lineChart(pts, { color: 'var(--c-gym)', unit: ' kg' })}`
+        : '<p class="empty-line">Note ton poids de temps en temps (par exemple chaque lundi matin) pour voir ta courbe.</p>'}`;
   }
 
   /* ---------- Argent ---------- */
@@ -1351,16 +1756,17 @@
     if (text.length < 2) { box.hidden = true; return; }
     suggTimer = setTimeout(async () => {
       let list = [];
-      try { list = await alSearch(text, type === 'manga' ? 'MANGA' : 'ANIME'); } catch (e) { box.hidden = true; return; }
+      try { list = type === 'book' ? await olSearch(text) : await alSearch(text, type === 'manga' ? 'MANGA' : 'ANIME'); }
+      catch (e) { box.hidden = true; return; }
       if (input.value.trim() !== text || document.activeElement !== input) return;
       suggResults[type] = list;
       if (!list.length) {
-        box.innerHTML = '<p class="sugg-none">Pas trouvé sur AniList (tu peux quand même l\'ajouter).</p>';
+        box.innerHTML = `<p class="sugg-none">Pas trouvé${type === 'book' ? '' : ' sur AniList'} (tu peux quand même l'ajouter).</p>`;
       } else {
         box.innerHTML = list.map((a, i) => `
           <button type="button" class="sugg-item" data-act="sugg-pick" data-type="${type}" data-i="${i}">
             ${coverImg(a, a.title, 'cover xs')}
-            <span><b>${esc(a.title)}</b><small>${[a.year, a.episodes ? a.episodes + ' ép.' : '', a.chapters ? a.chapters + ' ch.' : '',
+            <span><b>${esc(a.title)}</b><small>${[a.author, a.year, a.pages ? a.pages + ' pages' : '', a.episodes ? a.episodes + ' ép.' : '', a.chapters ? a.chapters + ' ch.' : '',
               a.fmt === 'MOVIE' ? 'film' : a.fmt === 'NOVEL' ? 'roman' : a.fmt === 'ONE_SHOT' ? 'one-shot' : ''].filter(Boolean).join(' · ')}</small></span>
           </button>`).join('');
       }
@@ -1396,6 +1802,9 @@
     Object.keys(state.daily).forEach(d => set.add(d));
     Object.keys(state.quran.reviews).forEach(d => set.add(d));
     Object.values(state.cali).forEach(x => { if (x.at) set.add(x.at); });
+    [state.study, state.mood, state.sleep, state.weights].forEach(o => Object.keys(o).forEach(d => set.add(d)));
+    state.workoutLog.forEach(x => set.add(x.date));
+    state.books.forEach(b => { if (b.doneAt) set.add(b.doneAt); });
     return new Set([...set].filter(d => d <= today));
   }
 
@@ -1475,6 +1884,14 @@
     p.surah = learnedTotal();
     p.review = Object.values(state.quran.reviews).reduce((t, l) => t + l.length, 0);
     p.quest = questsDoneTotal();
+    p.workout = state.workoutLog.length;
+    p.pages = Object.values(state.daily).reduce((t, l) => t + (l.pg || 0), 0);
+    p.booksDone = state.books.filter(b => b.status === 'done').length;
+    p.study = Object.values(state.study).reduce((t, v) => t + v, 0);
+    p.mood = Object.keys(state.mood).length;
+    p.sleep = Object.values(state.sleep).filter(s => s.bed && s.wake).length;
+    p.extraXp = p.workout * XP.workout + Math.floor(p.pages / 10) * XP.per10pages + p.booksDone * XP.bookDone +
+      Math.floor(p.study / 10) * XP.per10min + p.mood * XP.mood + p.sleep * XP.sleep;
     p.skills = 0;
     p.skillXp = 0;
     CALI.SKILLS.forEach(s => {
@@ -1484,7 +1901,7 @@
       p.animeGoal * XP.animeGoal + p.animeDone * XP.animeDone + p.todo * XP.todo + p.lift * XP.lift +
       p.saveGoal * XP.saveGoal + Math.floor(p.saved / 10) * XP.per10eur + p.perfect * XP.perfect +
       p.habit * XP.habit + p.review * XP.review + p.chapter * XP.chapter +
-      p.mangaGoal * XP.mangaGoal + p.mangaDone * XP.mangaDone + p.quest * XP.quest + p.skillXp;
+      p.mangaGoal * XP.mangaGoal + p.mangaDone * XP.mangaDone + p.quest * XP.quest + p.skillXp + p.extraXp;
     return { xp, p };
   }
 
@@ -1499,6 +1916,9 @@
     { id: 'save', need: 'money', target: () => 20, label: t => `Mets ${eur(t)} de côté`, m: c => c.save, fmt: v => eur(v) },
     { id: 'todo', need: 'todos', target: () => 3, label: t => `Coche ${t} autres objectifs`, m: c => c.todo },
     { id: 'cali', need: 'cali', target: () => 1, label: () => 'Réussis une nouvelle figure de callisthénie', m: c => c.cali },
+    { id: 'pages', need: 'books', target: () => 50, label: t => `Lis ${t} pages`, m: c => c.pg },
+    { id: 'study', need: 'study', target: () => 120, label: () => 'Révise 2 h dans la semaine', m: c => c.study, fmt: v => hmin(v) },
+    { id: 'workout', need: 'workout', target: () => 2, label: t => `Termine ${t} séances types`, m: c => c.workout },
     { id: 'active', need: null, target: () => 5, label: t => `Sois actif ${t} jours dans la semaine`, m: c => c.active }
   ];
 
@@ -1513,7 +1933,10 @@
       habits: state.habits.length > 0,
       money: months.some(m => m.money.entries.some(e => e.type === 'save') || m.money.saveGoal > 0),
       todos: months.some(m => m.todos.length),
-      cali: Object.keys(state.cali).length > 0
+      cali: Object.keys(state.cali).length > 0,
+      books: state.books.length > 0,
+      study: Object.keys(state.study).length > 0,
+      workout: state.workouts.length > 0
     };
   }
 
@@ -1531,9 +1954,11 @@
   function weekCounts(mk, act) {
     const dates = weekDates(mk);
     const gymSet = new Set(allGymDates());
-    const c = { gym: 0, review: 0, learn: 0, ep: 0, ch: 0, habits: 0, save: 0, todo: 0, active: 0, cali: 0 };
+    const c = { gym: 0, review: 0, learn: 0, ep: 0, ch: 0, habits: 0, save: 0, todo: 0, active: 0, cali: 0, pg: 0, study: 0, workout: 0 };
     const learnDays = Object.values(state.quran.learnedOn);
     c.cali = Object.values(state.cali).filter(x => x.s === 'done' && dates.includes(x.at)).length;
+    c.workout = state.workoutLog.filter(x => dates.includes(x.date)).length;
+    dates.forEach(d => { c.pg += (state.daily[d] || {}).pg || 0; c.study += state.study[d] || 0; });
     dates.forEach(d => {
       const k = d.slice(0, 7);
       const day = Number(d.slice(8));
@@ -1632,6 +2057,38 @@
     });
   }
 
+  /* ---------- Comptes à rebours ---------- */
+  let cdForm = false;
+
+  function renderCountdowns() {
+    const todayKey = dateKey(new Date());
+    const today = new Date(todayKey + 'T12:00:00');
+    const items = state.countdowns.slice().sort((a, b) => (a.date < b.date ? -1 : 1)).map(c => {
+      const days = Math.round((new Date(c.date + 'T12:00:00') - today) / 86400000);
+      const label = days > 0 ? `J-${days}` : days === 0 ? "Aujourd'hui !" : 'Passé';
+      const cls = days < 0 ? 'past' : days === 0 ? 'now' : days <= 7 ? 'soon' : '';
+      return `
+        <div class="cd ${cls}" data-cd="${c.id}">
+          <b class="cd-j">${label}</b>
+          <span class="cd-name">${esc(c.name)}<small>${fmtDay(c.date)}</small></span>
+          <button type="button" class="x" data-act="cd-del" aria-label="Supprimer ${esc(c.name)}" title="Supprimer">×</button>
+        </div>`;
+    }).join('');
+    $('#countdowns').innerHTML = `
+      <div class="cd-head">
+        <h3>Comptes à rebours <span class="jp" lang="ja">カウントダウン</span></h3>
+        <button type="button" class="btn sm" data-act="cd-toggle">${cdForm ? 'Fermer' : '+ Ajouter'}</button>
+      </div>
+      ${items ? `<div class="cd-list">${items}</div>`
+        : (cdForm ? '' : '<p class="hint">Partiels, vacances, anniversaire, sortie d\'une saison… Ajoute une date pour voir combien de jours il reste.</p>')}
+      ${cdForm ? `
+        <form class="add" data-form="cd" autocomplete="off">
+          <input class="wide" name="name" placeholder="Quoi ? (Partiels, vacances…)" required maxlength="40">
+          <input name="date" type="date" required min="${todayKey}" aria-label="Date">
+          <button class="btn primary" type="submit">Ajouter</button>
+        </form>` : ''}`;
+  }
+
   /* ---------- Succès ---------- */
   const BADGES = [
     { id: 'first', kanji: '初', name: 'Premier pas', desc: 'Gagner tes premiers XP', v: s => s.xp, goal: 1 },
@@ -1662,7 +2119,11 @@
     { id: 'cali10', kanji: '技', name: 'Street workout', desc: 'Réussir 10 figures de callisthénie', v: s => s.skills, goal: 10 },
     { id: 'caliHs', kanji: '立', name: 'Équilibriste', desc: "Réussir l'équilibre libre", v: s => s.skillHs, goal: 1 },
     { id: 'caliFl', kanji: '翔', name: 'Lévitation', desc: 'Réussir le front lever', v: s => s.skillFl, goal: 1 },
-    { id: 'caliT5', kanji: '神', name: 'Dieu du street', desc: 'Réussir une figure de niveau Légende', v: s => s.skillT5, goal: 1 }
+    { id: 'caliT5', kanji: '神', name: 'Dieu du street', desc: 'Réussir une figure de niveau Légende', v: s => s.skillT5, goal: 1 },
+    { id: 'book1', kanji: '本', name: 'Premier livre', desc: 'Finir un livre', v: s => s.booksDone, goal: 1 },
+    { id: 'book5', kanji: '書', name: 'Bibliothèque', desc: 'Finir 5 livres', v: s => s.booksDone, goal: 5 },
+    { id: 'study10', kanji: '学', name: 'Studieux', desc: 'Réviser 10 heures au total', v: s => s.studyH, goal: 10 },
+    { id: 'workout10', kanji: '練', name: 'Programme suivi', desc: 'Terminer 10 séances types', v: s => s.workouts, goal: 10 }
   ];
 
   function badgeStats(xpInfo) {
@@ -1692,7 +2153,10 @@
       skills: p.skills,
       skillHs: (state.cali.hs || {}).s === 'done' ? 1 : 0,
       skillFl: (state.cali.fl || {}).s === 'done' ? 1 : 0,
-      skillT5: CALI.SKILLS.filter(sk => sk.tier === 5 && (state.cali[sk.id] || {}).s === 'done').length
+      skillT5: CALI.SKILLS.filter(sk => sk.tier === 5 && (state.cali[sk.id] || {}).s === 'done').length,
+      booksDone: p.booksDone,
+      studyH: Math.floor(p.study / 60),
+      workouts: p.workout
     };
   }
 
@@ -1900,7 +2364,13 @@
       ["Objectifs de chapitres atteints", p.mangaGoal, XP.mangaGoal],
       ['Mangas terminés', p.mangaDone, XP.mangaDone],
       ['Quêtes réussies', p.quest, XP.quest],
-      ['Figures de callisthénie réussies', p.skills, 0, p.skillXp]
+      ['Figures de callisthénie réussies', p.skills, 0, p.skillXp],
+      ['Séances types terminées', p.workout, XP.workout],
+      ['Tranches de 10 pages lues', Math.floor(p.pages / 10), XP.per10pages],
+      ['Livres finis', p.booksDone, XP.bookDone],
+      ['Tranches de 10 min de révision', Math.floor(p.study / 10), XP.per10min],
+      ['Humeurs notées', p.mood, XP.mood],
+      ['Nuits notées', p.sleep, XP.sleep]
     ].filter(r => r[1] > 0);
 
     // Animes terminés (tous les mois)
@@ -1914,6 +2384,11 @@
     const totalEp = Object.values(state.months).reduce((t, m) => t + m.animes.reduce((s, a) => s + Math.max(0, a.ep - a.start), 0), 0);
 
     $('#bilanBody').innerHTML = `
+      <div class="share-box">
+        <button type="button" class="btn primary" data-act="share-make">Créer l'image de mon mois</button>
+        <div id="shareArea"></div>
+      </div>
+
       <section class="b-rank">
         <div class="b-lvl"><small>NIVEAU</small><b>${lvl}</b></div>
         <div class="b-rank-info">
@@ -1931,6 +2406,9 @@
         <div class="b-card"><b>${totalSessions}</b><span>séances de salle<br><small>au total</small></span></div>
         <div class="b-card"><b>${totalEp}</b><span>épisodes vus<br><small>au total</small></span></div>
       </div>
+
+      <h3 class="sub">Ton année</h3>
+      ${heatmapHtml()}
 
       <h3 class="sub">Succès <small class="sub-note">${okCount} / ${BADGES.length} débloqués</small></h3>
       <div class="badges">${BADGES.map(b => {
@@ -1980,9 +2458,208 @@
         : '<p class="empty-line">Quand tu finis un anime (dernier épisode vu), il arrive ici avec ta note.</p>'}`;
   }
 
+  /* ---------- Carte de l'année ---------- */
+  // Un « score » par jour : plus tu fais de choses, plus la case est foncée
+  function dayScores() {
+    const sc = {};
+    const add = (d, n) => { if (d) sc[d] = (sc[d] || 0) + n; };
+    allGymDates().forEach(d => add(d, 2));
+    Object.entries(state.daily).forEach(([d, l]) => add(d, Math.min(6, (l.ep || 0) + Math.ceil((l.ch || 0) / 5) + (l.todo || 0) + Math.ceil((l.pg || 0) / 20))));
+    Object.entries(state.quran.reviews).forEach(([d, l]) => add(d, l.length));
+    Object.values(state.quran.learnedOn).forEach(d => add(d, 2));
+    Object.entries(state.months).forEach(([k, m]) => {
+      Object.entries(m.habits).forEach(([hid, days]) => {
+        const h = state.habits.find(x => x.id === hid);
+        Object.entries(days).forEach(([d, c]) => add(`${k}-${String(d).padStart(2, '0')}`, c >= ((h && h.target) || 1) ? 1 : 0.5));
+      });
+      m.money.entries.forEach(e => { if (!e.sub) add(`${k}-${String(e.day).padStart(2, '0')}`, 1); });
+    });
+    Object.entries(state.study).forEach(([d, v]) => add(d, Math.ceil(v / 25)));
+    state.workoutLog.forEach(x => add(x.date, 2));
+    Object.values(state.cali).forEach(x => add(x.at, 3));
+    [state.mood, state.sleep].forEach(o => Object.keys(o).forEach(d => add(d, 0.5)));
+    Object.keys(state.activity).forEach(d => add(d, sc[d] ? 0 : 1));
+    return sc;
+  }
+
+  function heatmapHtml() {
+    const sc = dayScores();
+    const today = new Date();
+    const todayKey = dateKey(today);
+    const start = new Date(mondayKey(today) + 'T12:00:00');
+    start.setDate(start.getDate() - 52 * 7);
+    const level = v => (!v ? 0 : v < 2 ? 1 : v < 4 ? 2 : v < 7 ? 3 : 4);
+    let cols = '';
+    let months = '';
+    let active = 0;
+    let lastMonth = -1;
+    for (let w = 0; w < 53; w++) {
+      let cells = '';
+      for (let d = 0; d < 7; d++) {
+        const day = new Date(start);
+        day.setDate(start.getDate() + w * 7 + d);
+        const k = dateKey(day);
+        if (k > todayKey) { cells += '<span class="hm-cell out"></span>'; continue; }
+        const v = sc[k] || 0;
+        if (v) active++;
+        cells += `<span class="hm-cell l${level(v)} ${k === todayKey ? 'today' : ''}" data-tip="${JOURS[day.getDay()]} ${day.getDate()} ${MOIS_COURT[day.getMonth()]} : ${v ? Math.round(v * 2) / 2 + ' point' + (v > 1 ? 's' : '') : 'rien'}"></span>`;
+      }
+      const first = new Date(start);
+      first.setDate(start.getDate() + w * 7);
+      if (first.getMonth() !== lastMonth) {
+        months += `<span class="hm-month" style="grid-column:${w + 1}">${MOIS_COURT[first.getMonth()]}</span>`;
+        lastMonth = first.getMonth();
+      }
+      cols += `<div class="hm-col">${cells}</div>`;
+    }
+    return `
+      <div class="heatmap viz">
+        <div class="hm-scroll" id="hmScroll">
+          <div class="hm-months">${months}</div>
+          <div class="hm-grid">${cols}</div>
+        </div>
+        <div class="hm-legend"><span>${active} jour${active > 1 ? 's' : ''} actif${active > 1 ? 's' : ''} sur un an</span>
+          <span class="hm-scale">Moins <i class="hm-cell l0"></i><i class="hm-cell l1"></i><i class="hm-cell l2"></i><i class="hm-cell l3"></i><i class="hm-cell l4"></i> Plus</span>
+        </div>
+      </div>`;
+  }
+
+  /* ---------- Image du mois à partager ---------- */
+  let shareBlob = null;
+
+  async function makeShareImage() {
+    const W = 1080, H = 1920;
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d');
+    const css = getComputedStyle(document.documentElement);
+    const C = n => css.getPropertyValue(n).trim() || '#000';
+    const PAPER = C('--paper'), CARD = C('--card'), INK = C('--ink'), RED = C('--red'), MUTED = C('--muted');
+    const TITLE = "'Dela Gothic One', 'Yu Gothic', sans-serif";
+    const BODY = "'Zen Kaku Gothic New', 'Segoe UI', sans-serif";
+    try {
+      await Promise.all([
+        document.fonts.load(`100px 'Dela Gothic One'`, '月0123456789%NIVÉ'),
+        document.fonts.load(`700 40px 'Zen Kaku Gothic New'`, 'abc')
+      ]);
+    } catch (e) { /* tant pis : polices du système */ }
+
+    // Papier, lignes de vitesse, trames de points
+    ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.strokeStyle = INK; ctx.lineCap = 'round';
+    for (let i = 0; i < 90; i++) {
+      const a = (i / 90) * Math.PI * 2;
+      ctx.globalAlpha = 0.07; ctx.lineWidth = i % 2 ? 4 : 9;
+      ctx.beginPath();
+      ctx.moveTo(540 + Math.cos(a) * 330, 400 + Math.sin(a) * 330);
+      ctx.lineTo(540 + Math.cos(a) * 1300, 400 + Math.sin(a) * 1300);
+      ctx.stroke();
+    }
+    ctx.restore();
+    const dots = (cx, cy, r, maxA) => {
+      ctx.fillStyle = INK;
+      for (let y = 15; y < H; y += 30) for (let x = 15; x < W; x += 30) {
+        const d = Math.hypot(x - cx, y - cy) / r;
+        if (d >= 1) continue;
+        ctx.globalAlpha = maxA * (1 - d);
+        ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    };
+    dots(W, 0, 650, 0.25);
+    dots(0, H, 600, 0.2);
+
+    const box = (x, y, w, h, fill, shadow) => {
+      if (shadow) { ctx.fillStyle = shadow; ctx.fillRect(x + 14, y + 14, w, h); }
+      ctx.fillStyle = fill; ctx.fillRect(x, y, w, h);
+      ctx.lineWidth = 8; ctx.strokeStyle = INK; ctx.strokeRect(x, y, w, h);
+    };
+
+    // Le mois
+    const { y: yr, m } = partsOf(current);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.font = `360px ${TITLE}`;
+    ctx.fillStyle = RED; ctx.fillText(`${m}月`, 540 + 16, 470 + 16);
+    ctx.fillStyle = INK; ctx.fillText(`${m}月`, 540, 470);
+    ctx.font = `86px ${TITLE}`;
+    ctx.fillText(`${MOIS[m - 1].toUpperCase()} ${yr}`, 540, 600);
+
+    // Bulle avec le score du mois
+    const mo = state.months[current] || emptyMonth();
+    const pct = monthPct(mo, current);
+    box(170, 660, 740, 220, CARD, INK);
+    ctx.fillStyle = INK; ctx.font = `150px ${TITLE}`; ctx.textAlign = 'left';
+    ctx.fillText(`${pct}%`, 220, 830);
+    ctx.font = `700 46px ${BODY}`;
+    ctx.fillText('du mois', 640, 760);
+    ctx.fillText('accompli', 640, 820);
+
+    // Rang
+    const { xp } = computeXP();
+    const lvl = levelOf(xp);
+    const rank = rankOf(lvl);
+    ctx.fillStyle = INK; ctx.fillRect(170, 930, 740, 120);
+    ctx.fillStyle = PAPER; ctx.textAlign = 'center';
+    const rankTxt = `NIV. ${lvl} · ${rank.name.toUpperCase()}`;
+    let fs = 64;
+    ctx.font = `${fs}px ${TITLE}`;
+    while (ctx.measureText(rankTxt).width > 680 && fs > 34) { fs -= 2; ctx.font = `${fs}px ${TITLE}`; }
+    ctx.fillText(rankTxt, 540, 1012);
+
+    // Les chiffres du mois
+    const st = streaks();
+    const studyMin = Object.entries(state.study).filter(([d]) => d.startsWith(current)).reduce((t, [, v]) => t + v, 0);
+    const stats = [
+      ['Séances de salle', String(mo.gym.days.length)],
+      ['Sourates apprises', String(learnedIn(current))],
+      ['Épisodes vus', String(mo.animes.reduce((t, a) => t + Math.max(0, a.ep - a.start), 0))],
+      ['Chapitres lus', String(mo.mangas.reduce((t, a) => t + Math.max(0, a.ep - a.start), 0))],
+      ['Mis de côté', eur(moneySum(mo.money, 'save'))],
+      ['Révision', hmin(studyMin)],
+      ['Livres finis', String(state.books.filter(b => b.doneAt && b.doneAt.startsWith(current)).length)],
+      ["Jours d'affilée", String(st.now)]
+    ];
+    stats.forEach(([label, val], i) => {
+      const col = i % 2, row = Math.floor(i / 2);
+      const x = 90 + col * 470, y = 1110 + row * 180;
+      box(x, y, 430, 150, CARD, i % 3 === 0 ? RED : INK);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = MUTED; ctx.font = `700 34px ${BODY}`;
+      ctx.fillText(label.toUpperCase(), x + 26, y + 52);
+      ctx.fillStyle = INK; ctx.font = `${val.length > 7 ? 54 : 68}px ${TITLE}`;
+      ctx.fillText(val, x + 26, y + 125);
+    });
+
+    ctx.textAlign = 'center'; ctx.fillStyle = INK; ctx.font = `46px ${TITLE}`;
+    ctx.fillText('MES OBJECTIFS DU MOIS', 540, 1860);
+
+    return new Promise(res => cv.toBlob(b => res(b), 'image/png'));
+  }
+
+  async function showShareImage() {
+    const area = $('#shareArea');
+    area.innerHTML = '<p class="hint">Je dessine ton image…</p>';
+    shareBlob = await makeShareImage();
+    if (!shareBlob) { area.innerHTML = '<p class="hint">Oups, impossible de créer l\'image sur cet appareil.</p>'; return; }
+    const url = URL.createObjectURL(shareBlob);
+    const file = new File([shareBlob], `mon-mois-${current}.png`, { type: 'image/png' });
+    const canShare = navigator.canShare && navigator.canShare({ files: [file] });
+    area.innerHTML = `
+      <img class="share-img" src="${url}" alt="Image de ton mois">
+      <div class="sync-actions">
+        ${canShare ? '<button type="button" class="btn primary" data-act="share-send">Partager</button>' : ''}
+        <a class="btn ${canShare ? '' : 'primary'}" href="${url}" download="mon-mois-${current}.png">Télécharger l'image</a>
+      </div>
+      <p class="hint">Sur iPhone : « Partager » puis « Enregistrer l'image » pour la mettre dans tes photos.</p>`;
+  }
+
   function openModal(id) {
     if (id === 'bilanModal') renderBilan();
     $('#' + id).hidden = false;
+    // La carte de l'année défile : on montre les semaines les plus récentes
+    const hm = id === 'bilanModal' && $('#hmScroll');
+    if (hm) hm.scrollLeft = hm.scrollWidth;
   }
 
   /* ---------- Bulle d'infos au survol des graphiques ---------- */
@@ -2030,6 +2707,7 @@
     renderAnime();
     renderQuran();
     renderManga();
+    renderStudy();
     renderHabits();
     renderCali();
     renderGym();
@@ -2524,7 +3202,292 @@
   /* ---------- Thème ---------- */
   function applyTheme(theme) {
     document.documentElement.dataset.theme = theme;
-    $('#themeBtn').textContent = theme === 'dark' ? 'Mode jour' : 'Mode nuit';
+  }
+
+  /* =========================================================
+     Réglages : couleurs, mode nuit, code secret, sauvegarde
+     ========================================================= */
+  function loadPrefs() {
+    try { const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'); return (p && typeof p === 'object') ? p : {}; }
+    catch (e) { return {}; }
+  }
+  const prefs = loadPrefs();
+  const savePrefs = () => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) { /* rien */ } };
+  const restSeconds = () => prefs.rest || 90;
+
+  function applyPalette(id) {
+    const ok = PALETTES.some(p => p.id === id) ? id : 'classique';
+    if (ok === 'classique') delete document.documentElement.dataset.palette;
+    else document.documentElement.dataset.palette = ok;
+  }
+
+  async function sha(text) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('mes-objectifs:' + text));
+    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  const hasLock = () => { try { return Boolean(localStorage.getItem(LOCK_KEY)); } catch (e) { return false; } };
+
+  function renderSettings() {
+    const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+    const pal = prefs.palette || 'classique';
+    const lock = hasLock();
+    $('#settingsBody').innerHTML = `
+      <h3 class="sub">Couleurs</h3>
+      <div class="palettes">${PALETTES.map(p => `
+        <button type="button" class="pal ${p.id === pal ? 'on' : ''}" data-act="set-palette" data-v="${p.id}" aria-pressed="${p.id === pal}">
+          <span class="pal-sw">${p.colors.map(c => `<i style="background:${c}"></i>`).join('')}</span>${p.name}
+        </button>`).join('')}
+      </div>
+
+      <h3 class="sub">Mode</h3>
+      <div class="seg" role="group" aria-label="Mode">
+        <button type="button" data-act="set-theme" data-v="light" class="${theme === 'light' ? 'on' : ''}">Jour</button>
+        <button type="button" data-act="set-theme" data-v="dark" class="${theme === 'dark' ? 'on' : ''}">Nuit</button>
+      </div>
+
+      <h3 class="sub">Code secret</h3>
+      ${lock ? `
+        <p class="sync-ok">Code activé sur cet appareil.</p>
+        <form class="token-row" data-form="lock-off" autocomplete="off">
+          <input name="code" type="password" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" placeholder="Code actuel" required aria-label="Code actuel">
+          <button class="btn" type="submit">Enlever le code</button>
+        </form>`
+        : `
+        <p>Un code à 4 chiffres est demandé à l'ouverture de l'appli (et après 5 min sans l'utiliser).</p>
+        <form class="token-row" data-form="lock-on" autocomplete="off">
+          <input name="code1" type="password" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" placeholder="Code (4 chiffres)" required aria-label="Nouveau code">
+          <input name="code2" type="password" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" placeholder="Encore une fois" required aria-label="Confirmer le code">
+          <button class="btn primary" type="submit">Activer</button>
+        </form>`}
+      <p class="hint">Le code reste sur cet appareil seulement. Il empêche qu'on fouille dans ton appli, mais ce n'est pas un coffre-fort.</p>
+
+      <h3 class="sub">Minuteur de repos</h3>
+      <div class="seg" role="group" aria-label="Repos par défaut">${[60, 90, 120, 180].map(s =>
+        `<button type="button" data-act="set-rest" data-v="${s}" class="${restSeconds() === s ? 'on' : ''}">${s < 120 ? s + ' s' : s / 60 + ' min'}</button>`).join('')}
+      </div>
+
+      <h3 class="sub">Sauvegarde</h3>
+      <div class="sync-actions">
+        <button type="button" class="btn" data-act="export">Sauvegarder un fichier</button>
+        <label class="btn" for="importFile">Charger un fichier</label>
+      </div>
+      <p class="hint">Le fichier est une copie de secours de toutes tes données (sans ta clé de synchro).</p>`;
+  }
+
+  /* =========================================================
+     Minuteurs (sans aucun son) : repos, révision, pause
+     ========================================================= */
+  let timer = loadTimer();   // { kind: 'rest' | 'study' | 'break', end, total, label, start }
+  let timerInt = 0;
+
+  function loadTimer() {
+    try { const t = JSON.parse(localStorage.getItem(TIMER_KEY) || 'null'); return t && t.end ? t : null; }
+    catch (e) { return null; }
+  }
+  function saveTimer() {
+    try { if (timer) localStorage.setItem(TIMER_KEY, JSON.stringify(timer)); else localStorage.removeItem(TIMER_KEY); }
+    catch (e) { /* rien */ }
+  }
+  const mmss = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+  function startTimer(kind, seconds, label) {
+    if (timer && timer.kind === 'study') stopTimer();
+    timer = { kind, end: Date.now() + seconds * 1000, total: seconds, label, start: Date.now() };
+    saveTimer();
+    clearInterval(timerInt);
+    timerInt = setInterval(tickTimer, 250);
+    tickTimer();
+  }
+
+  // Arrête le minuteur. Pour la révision, on compte les minutes déjà faites.
+  function stopTimer() {
+    const t = timer;
+    timer = null;
+    saveTimer();
+    clearInterval(timerInt);
+    const box = $('#timerFloat');
+    box.hidden = true;
+    if (t && t.kind === 'study') {
+      const mins = Math.floor((Math.min(Date.now(), t.end) - t.start) / 60000);
+      if (mins > 0) addStudy(mins, t.start);
+    }
+    return t;
+  }
+
+  function tickTimer() {
+    const box = $('#timerFloat');
+    if (!timer) { box.hidden = true; return; }
+    if (!timerInt) timerInt = setInterval(tickTimer, 250);
+    const left = Math.max(0, Math.ceil((timer.end - Date.now()) / 1000));
+    box.hidden = false;
+    box.dataset.kind = timer.kind;
+    $('#tfLabel').textContent = timer.label;
+    $('#tfTime').textContent = mmss(left);
+    box.style.setProperty('--p', (100 - clamp01(left / timer.total) * 100) + '%');
+    if (left <= 0) timerDone();
+  }
+
+  function timerDone() {
+    const t = stopTimer();
+    if (!t) return;
+    try { if (navigator.vibrate) navigator.vibrate([250, 120, 250]); } catch (e) { /* rien */ }
+    if (t.kind === 'rest') {
+      overlay('<span class="jp">いくぞ!</span><span class="lv">Repos terminé</span><span class="new-rank">Série suivante, c\'est reparti !</span>');
+    } else if (t.kind === 'study') {
+      overlay(`<span class="jp">お疲れ!</span><span class="lv">${Math.round(t.total / 60)} min de révision</span><span class="new-rank">Bien joué ! Pause de 5 min lancée.</span>`, 10);
+      startTimer('break', 300, 'Pause');
+    } else {
+      overlay('<span class="jp">再開!</span><span class="lv">Pause finie</span><span class="new-rank">On y retourne quand tu veux.</span>');
+    }
+  }
+
+  function addStudy(mins, ts) {
+    const k = dateKey(new Date(ts || Date.now()));
+    state.study[k] = (state.study[k] || 0) + mins;
+    save();
+    renderStudy();
+    renderHeader();
+    afterRender();
+  }
+
+  /* ---------- Chrono des figures « à tenir » ---------- */
+  let chrono = null;   // { sid, phase: 'ready' | 'count' | 'run' | 'done', t0, result, raf }
+  const goalSeconds = sk => { const m = /tenir\s+(\d+)\s*s/i.exec(sk.goal); return m ? Number(m[1]) : 0; };
+  const fmtSec = s => s.toFixed(1).replace('.', ',') + ' s';
+
+  function openChrono(sid) {
+    chrono = { sid, phase: 'ready' };
+    $('#chrono').hidden = false;
+    drawChrono();
+  }
+
+  function closeChrono() {
+    if (chrono && chrono.raf) cancelAnimationFrame(chrono.raf);
+    if (chrono && chrono.countTimer) clearInterval(chrono.countTimer);
+    chrono = null;
+    $('#chrono').hidden = true;
+  }
+
+  function drawChrono() {
+    if (!chrono) return;
+    const sk = CALI.SKILLS.find(s => s.id === chrono.sid);
+    const x = state.cali[sk.id] || {};
+    const goal = goalSeconds(sk);
+    const tier = `style="--tier: var(--tier-${sk.tier})"`;
+    const box = $('#chronoBody');
+    if (chrono.phase === 'ready') {
+      box.innerHTML = `
+        <div class="ch-fig" ${tier}>${CALI.svg(sk)}</div>
+        <h2>${esc(sk.name)}</h2>
+        <p class="ch-info">Objectif : <b>${goal} s</b>${x.best ? ` · Record : <b>${fmtSec(x.best)}</b>` : ''}</p>
+        <button type="button" class="btn primary big" data-act="chrono-go">Partir (3, 2, 1…)</button>
+        <button type="button" class="btn" data-act="chrono-close">Fermer</button>
+        <p class="hint">Tu as 3 secondes pour te mettre en place. Touche l'écran pour arrêter.</p>`;
+    } else if (chrono.phase === 'count') {
+      box.innerHTML = `<div class="ch-count" ${tier}>${chrono.count}</div><p class="ch-info">Mets-toi en place…</p>`;
+    } else if (chrono.phase === 'run') {
+      box.innerHTML = `
+        <div class="ch-time" id="chTime">0,0</div>
+        <p class="ch-info">Objectif : ${goal} s${x.best ? ` · Record : ${fmtSec(x.best)}` : ''}</p>
+        <div class="ch-goal" ${tier}><i id="chGoal"></i></div>
+        <button type="button" class="btn primary big" data-act="chrono-stop">Stop</button>`;
+    } else {
+      const r = chrono.result;
+      const reached = goal && r >= goal;
+      box.innerHTML = `
+        <div class="ch-time done">${fmtSec(r)}</div>
+        <p class="ch-msg">${chrono.record ? '<b>Nouveau record !</b> ' : ''}${reached ? 'Objectif atteint !' : goal ? `Encore ${fmtSec(Math.max(0, goal - r))} pour l'objectif` : ''}</p>
+        <div class="sync-actions">
+          ${reached && x.s !== 'done' ? '<button type="button" class="btn primary" data-act="chrono-win">Marquer réussi !</button>' : ''}
+          <button type="button" class="btn" data-act="chrono-go">Recommencer</button>
+          <button type="button" class="btn" data-act="chrono-close">Fermer</button>
+        </div>`;
+    }
+  }
+
+  function chronoGo() {
+    if (!chrono) return;
+    chrono.phase = 'count';
+    chrono.count = 3;
+    drawChrono();
+    chrono.countTimer = setInterval(() => {
+      chrono.count--;
+      if (chrono.count > 0) { drawChrono(); return; }
+      clearInterval(chrono.countTimer);
+      chrono.phase = 'run';
+      chrono.t0 = performance.now();
+      drawChrono();
+      const sk = CALI.SKILLS.find(s => s.id === chrono.sid);
+      const goal = goalSeconds(sk) || 10;
+      const loop = () => {
+        if (!chrono || chrono.phase !== 'run') return;
+        const s = (performance.now() - chrono.t0) / 1000;
+        const el = $('#chTime');
+        if (el) el.textContent = s.toFixed(1).replace('.', ',');
+        const g = $('#chGoal');
+        if (g) g.style.width = Math.min(100, (s / goal) * 100) + '%';
+        if (g && s >= goal) g.parentElement.classList.add('ok');
+        chrono.raf = requestAnimationFrame(loop);
+      };
+      loop();
+    }, 1000);
+  }
+
+  function chronoStop() {
+    if (!chrono || chrono.phase !== 'run') return;
+    cancelAnimationFrame(chrono.raf);
+    const r = Math.round(((performance.now() - chrono.t0) / 1000) * 10) / 10;
+    chrono.result = r;
+    chrono.phase = 'done';
+    const sid = chrono.sid;
+    const x = state.cali[sid] || {};
+    chrono.record = r > (x.best || 0);
+    if (chrono.record) {
+      x.best = r;
+      x.rec = fmtSec(r);
+      if (!x.s) x.s = 'work';
+      state.cali[sid] = x;
+      markActive();
+      save();
+      renderCali();
+      afterRender();
+    }
+    drawChrono();
+  }
+
+  /* ---------- Écran de verrouillage ---------- */
+  let wiping = false;   // vrai pendant qu'on efface les données (on ne réenregistre rien)
+  let lockInput = '';
+  let hiddenAt = 0;
+
+  function showLock() {
+    if (!hasLock()) return;
+    lockInput = '';
+    drawLockDots();
+    document.documentElement.classList.add('locked');
+  }
+
+  function drawLockDots(state2) {
+    const dots = $('#lockDots');
+    dots.className = 'lock-dots' + (state2 ? ' ' + state2 : '');
+    [...dots.children].forEach((d, i) => d.classList.toggle('on', i < lockInput.length));
+  }
+
+  async function lockKey(v) {
+    if (v === 'del') lockInput = lockInput.slice(0, -1);
+    else if (lockInput.length < 4) lockInput += v;
+    drawLockDots();
+    if (lockInput.length < 4) return;
+    let ok = false;
+    try { ok = (await sha(lockInput)) === localStorage.getItem(LOCK_KEY); } catch (e) { ok = false; }
+    if (ok) {
+      document.documentElement.classList.remove('locked');
+      lockInput = '';
+      drawLockDots();
+    } else {
+      drawLockDots('wrong');
+      setTimeout(() => { lockInput = ''; drawLockDots(); }, 550);
+    }
   }
 
   /* =========================================================
@@ -2613,13 +3576,59 @@
           .catch(err => { syncError = friendly(err); setSyncStatus('err'); renderSyncModal(); });
         break;
       }
-      case 'theme': {
-        const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      case 'theme':
+      case 'set-theme': {
+        const next = act === 'set-theme' ? t.dataset.v : (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
         state.theme = next;
         applyTheme(next);
         save();
+        if (!$('#settingsModal').hidden) renderSettings();
         break;
       }
+      case 'settings-open': renderSettings(); openModal('settingsModal'); break;
+      case 'set-palette':
+        prefs.palette = t.dataset.v;
+        savePrefs();
+        applyPalette(prefs.palette);
+        renderSettings();
+        break;
+      case 'set-rest':
+        prefs.rest = Number(t.dataset.v);
+        savePrefs();
+        renderSettings();
+        break;
+      case 'lock-key': lockKey(t.dataset.v); break;
+
+      /* --- minuteurs et chrono --- */
+      case 'rest-start': startTimer('rest', Number(t.dataset.v) || restSeconds(), 'Repos'); break;
+      case 'study-start': startTimer('study', Number(t.dataset.v) * 60, 'Révision'); break;
+      case 'break-start': startTimer('break', Number(t.dataset.v) * 60, 'Pause'); break;
+      case 'timer-add':
+        if (timer) { timer.end += 30000; timer.total += 30; saveTimer(); tickTimer(); }
+        break;
+      case 'timer-stop': {
+        const st = stopTimer();
+        if (st && st.kind === 'study') toast('Révision arrêtée : les minutes faites sont comptées.');
+        break;
+      }
+      case 'skill-chrono': openChrono(t.closest('[data-skill]').dataset.skill); break;
+      case 'chrono-go': chronoGo(); break;
+      case 'chrono-stop': chronoStop(); break;
+      case 'chrono-close': closeChrono(); break;
+      case 'chrono-win': {
+        const sid = chrono && chrono.sid;
+        closeChrono();
+        const btn = sid && $(`#caliBody [data-skill="${sid}"] [data-act="skill-done"]`);
+        if (btn) btn.click();
+        break;
+      }
+      case 'lock-forgot':
+        if (confirm("Ton code n'existe que sur cet appareil.\n\nPour l'enlever, il faut effacer les données de CET appareil. Si tu as la synchro tél ↔ PC, tu les récupéreras en recollant ta clé.\n\nEffacer les données de cet appareil ?")) {
+          wiping = true;
+          try { [KEY, LOCK_KEY, SYNC_KEY, LEVEL_KEY, QUEST_KEY, BADGE_KEY, TIMER_KEY, SESSION_KEY].forEach(k => localStorage.removeItem(k)); } catch (err) { /* rien */ }
+          location.reload();
+        }
+        break;
 
       /* --- animes --- */
       case 'anime-plus':
@@ -2704,6 +3713,183 @@
         toast(`Habitude « ${h.name} » supprimée.`, snap);
         break;
       }
+
+      /* --- image à partager --- */
+      case 'share-make': showShareImage(); break;
+      case 'share-send':
+        if (shareBlob) {
+          const file = new File([shareBlob], `mon-mois-${current}.png`, { type: 'image/png' });
+          navigator.share({ files: [file], title: 'Mon mois' }).catch(() => { /* partage annulé */ });
+        }
+        break;
+
+      /* --- comptes à rebours --- */
+      case 'cd-toggle':
+        cdForm = !cdForm;
+        renderCountdowns();
+        if (cdForm) $('#countdowns form [name="name"]').focus();
+        break;
+      case 'cd-del': {
+        const cid = t.closest('[data-cd]').dataset.cd;
+        const c = byId(state.countdowns, cid);
+        if (!c) return;
+        const snap = snapshot();
+        state.countdowns = state.countdowns.filter(x => x.id !== cid);
+        save(); renderCountdowns();
+        toast(`« ${c.name} » supprimé.`, snap);
+        break;
+      }
+
+      /* --- livres --- */
+      case 'book-status':
+      case 'book-plus':
+      case 'book-rate':
+      case 'book-del': {
+        const bid = t.closest('[data-book]').dataset.book;
+        const b = byId(state.books, bid);
+        if (!b) return;
+        if (act === 'book-del') {
+          const snap = snapshot();
+          state.books = state.books.filter(x => x.id !== bid);
+          save(); renderStudy(); renderHeader(); afterRender();
+          toast(`« ${b.title} » supprimé.`, snap);
+          return;
+        }
+        if (act === 'book-rate') { const v = Number(t.dataset.v); b.rating = b.rating === v ? 0 : v; save(); renderStudy(); afterRender(); return; }
+        const wasDone = b.status === 'done';
+        if (act === 'book-status') {
+          b.status = t.dataset.v;
+          if (b.status === 'done' && b.pages && b.page < b.pages) { logDaily('pg', b.pages - b.page); b.page = b.pages; }
+        } else {
+          const before = b.page || 0;
+          b.page = b.pages ? Math.min(b.pages, before + 10) : before + 10;
+          logDaily('pg', b.page - before);
+          if (b.status === 'todo') b.status = 'reading';
+          if (b.pages && b.page >= b.pages) b.status = 'done';
+          markActive();
+        }
+        if (b.status === 'done' && !wasDone) { b.doneAt = dateKey(new Date()); fresh.add('b' + bid); markActive(); }
+        if (b.status !== 'done') delete b.doneAt;
+        save(); renderStudy(); renderHeader(); afterRender();
+        if (b.status === 'done' && !wasDone) {
+          celebrate($(`#studyBody [data-book="${bid}"]`), '読了!');
+          toast(`Livre fini : « ${b.title} » · +${XP.bookDone} XP`);
+        }
+        break;
+      }
+
+      /* --- humeur --- */
+      case 'mood': {
+        const k = dateKey(new Date());
+        const v = Number(t.dataset.v);
+        if (state.mood[k] === v) delete state.mood[k];
+        else { state.mood[k] = v; markActive(); }
+        save(); renderHabits(); renderHeader(); afterRender();
+        break;
+      }
+
+      /* --- séances types --- */
+      case 'wk-template':
+      case 'wk-new': {
+        const tpl = act === 'wk-template' ? WORKOUT_TEMPLATES[Number(t.dataset.i)] : { name: 'Ma séance', ex: [['Exercice', 3, '10']] };
+        const wid = uid();
+        state.workouts.push({ id: wid, name: tpl.name, ex: tpl.ex.map(([name, sets, reps]) => ({ id: uid() + Math.random().toString(36).slice(2, 5), name, sets, reps })) });
+        if (act === 'wk-new') editingWorkout = wid;
+        added.add(wid);
+        save(); renderGym(); afterRender();
+        break;
+      }
+      case 'wk-edit': {
+        const wid = t.closest('[data-wid]').dataset.wid;
+        editingWorkout = editingWorkout === wid ? null : wid;
+        renderGym(); afterRender();
+        break;
+      }
+      case 'wk-del': {
+        const wid = t.closest('[data-wid]').dataset.wid;
+        const w = byId(state.workouts, wid);
+        if (!w) return;
+        const snap = snapshot();
+        state.workouts = state.workouts.filter(x => x.id !== wid);
+        const s = loadSession();
+        if (s && s.wid === wid) saveSession(null);
+        save(); renderGym(); afterRender();
+        toast(`Séance « ${w.name} » supprimée.`, snap);
+        break;
+      }
+      case 'wkex-add': {
+        const w = byId(state.workouts, t.closest('[data-wid]').dataset.wid);
+        if (!w) return;
+        w.ex.push({ id: uid(), name: 'Exercice', sets: 3, reps: '10' });
+        save(); renderGym(); afterRender();
+        const rows = document.querySelectorAll(`#gymBody [data-wid="${w.id}"] .wk-ex input[data-act="wkex-name"]`);
+        if (rows.length) { rows[rows.length - 1].focus(); rows[rows.length - 1].select(); }
+        break;
+      }
+      case 'wkex-del': {
+        const w = byId(state.workouts, t.closest('[data-wid]').dataset.wid);
+        if (!w) return;
+        w.ex = w.ex.filter(e => e.id !== t.closest('[data-ex]').dataset.ex);
+        save(); renderGym(); afterRender();
+        break;
+      }
+      case 'wk-start': {
+        const wid = t.dataset.wid || t.closest('[data-wid]').dataset.wid;
+        const w = byId(state.workouts, wid);
+        if (!w || !w.ex.length) { toast("Ajoute d'abord des exercices à cette séance."); return; }
+        let s = loadSession();
+        if (!s || s.wid !== wid) {
+          if (s && !confirm('Une autre séance est en cours. La remplacer ?')) return;
+          s = { wid, start: Date.now(), sets: {} };
+          saveSession(s);
+        }
+        editingWorkout = null;
+        renderWorkout();
+        openModal('workoutModal');
+        renderGym(); afterRender();
+        break;
+      }
+      case 'wr-set': {
+        const s = loadSession();
+        const w = s && byId(state.workouts, s.wid);
+        if (!w) return;
+        const eid = t.closest('[data-ex]').dataset.ex;
+        const e = byId(w.ex, eid);
+        const v = Number(t.dataset.v);
+        const n = s.sets[eid] || 0;
+        s.sets[eid] = n === v ? v - 1 : v;
+        saveSession(s);
+        const allDone = w.ex.every(x => (s.sets[x.id] || 0) >= x.sets);
+        if (s.sets[eid] > n && !allDone) startTimer('rest', restSeconds(), `Repos · ${e ? e.name : ''}`);
+        renderWorkout();
+        if (allDone) toast('Toutes les séries sont faites ! Touche « Terminer la séance ».');
+        break;
+      }
+      case 'wk-finish': {
+        const s = loadSession();
+        const w = s && byId(state.workouts, s.wid);
+        if (!w) return;
+        const now = new Date();
+        const nowKey = keyOf(now);
+        state.workoutLog.push({ date: dateKey(now), wid: w.id, name: w.name });
+        if (!state.months[nowKey]) state.months[nowKey] = emptyMonth();
+        const g = state.months[nowKey].gym;
+        if (!g.days.includes(now.getDate())) { g.days.push(now.getDate()); g.days.sort((a, b) => a - b); }
+        markActive();
+        saveSession(null);
+        if (timer && timer.kind === 'rest') stopTimer();
+        $('#workoutModal').hidden = true;
+        save(); renderGym(); renderHeader(); afterRender();
+        overlay(`<span class="jp">練習完了!</span><span class="lv">${esc(w.name)}</span><span class="new-rank">Séance notée dans ton calendrier · +${XP.workout} XP</span>`, 14);
+        break;
+      }
+      case 'wk-cancel':
+        if (!confirm('Abandonner cette séance ? Elle ne sera pas comptée.')) return;
+        saveSession(null);
+        if (timer && timer.kind === 'rest') stopTimer();
+        $('#workoutModal').hidden = true;
+        renderGym(); afterRender();
+        break;
 
       /* --- callisthénie --- */
       case 'skill-work':
@@ -2834,6 +4020,7 @@
         if (!l) return;
         const before = liftPct(l);
         l.cur = Math.round((l.cur + (act === 'lift-plus' ? 1 : -1)) * 100) / 100;
+        logLift(l);
         if (act === 'lift-plus') markActive();
         const after = liftPct(l);
         const reached = before < 1 && after >= 1;
@@ -2973,6 +4160,61 @@
         if (h) { h.name = t.value.trim() || h.name; t.value = h.name; save(); renderHeader(); }
         break;
       }
+      case 'wk-name':
+      case 'wkex-name':
+      case 'wkex-sets':
+      case 'wkex-reps': {
+        const w = byId(state.workouts, t.closest('[data-wid]').dataset.wid);
+        if (!w) return;
+        if (act === 'wk-name') w.name = t.value.trim() || w.name;
+        else {
+          const e = byId(w.ex, t.closest('[data-ex]').dataset.ex);
+          if (!e) return;
+          if (act === 'wkex-name') e.name = t.value.trim() || e.name;
+          if (act === 'wkex-sets') e.sets = Math.min(20, Math.max(1, Math.round(num(t.value, e.sets))));
+          if (act === 'wkex-reps') e.reps = t.value.trim() || e.reps;
+        }
+        save();
+        break;
+      }
+      case 'lift-chart':
+        liftChartSel = t.value;
+        renderGym(); afterRender();
+        break;
+      case 'book-title':
+      case 'book-page':
+      case 'book-total': {
+        const b = byId(state.books, t.closest('[data-book]').dataset.book);
+        if (!b) return;
+        if (act === 'book-title') { b.title = t.value.trim() || b.title; save(); return; }
+        const wasDone = b.status === 'done';
+        if (act === 'book-total') b.pages = Math.max(0, Math.round(num(t.value, 0)));
+        else {
+          const before = b.page || 0;
+          b.page = Math.max(0, Math.round(num(t.value, before)));
+          if (b.pages) b.page = Math.min(b.page, b.pages);
+          if (b.page > before) { logDaily('pg', b.page - before); markActive(); }
+        }
+        if (b.pages && b.page >= b.pages) b.status = 'done';
+        if (b.status === 'done' && !wasDone) { b.doneAt = dateKey(new Date()); fresh.add('b' + b.id); }
+        save(); renderStudy(); renderHeader(); afterRender();
+        if (b.status === 'done' && !wasDone) celebrate($(`#studyBody [data-book="${b.id}"]`), '読了!');
+        break;
+      }
+      case 'sleep-bed':
+      case 'sleep-wake': {
+        const k = dateKey(new Date());
+        const s = state.sleep[k] || {};
+        s[act === 'sleep-bed' ? 'bed' : 'wake'] = t.value;
+        if (!s.bed && !s.wake) delete state.sleep[k]; else state.sleep[k] = s;
+        if (s.bed && s.wake) markActive();
+        save(); renderHeader();
+        // On met juste la durée à jour (sans redessiner, pour ne pas gêner la saisie de l'heure)
+        const dur = sleepMinutes(s);
+        const el = $('#habitBody .sleep-dur');
+        if (el) { el.textContent = dur ? hm(dur) : '—'; el.classList.toggle('short', Boolean(dur && dur < 360)); }
+        break;
+      }
       case 'skill-rec': {
         const sid = t.closest('[data-skill]').dataset.skill;
         const x = state.cali[sid] || {};
@@ -3003,7 +4245,7 @@
         const l = byId(m.gym.lifts, id);
         if (!l) return;
         const before = liftPct(l);
-        if (act === 'lift-cur') l.cur = num(t.value, l.cur);
+        if (act === 'lift-cur') { l.cur = num(t.value, l.cur); logLift(l); }
         else l.target = num(t.value, l.target);
         if (before < 1 && liftPct(l) >= 1) fresh.add(id);
         save(); renderGym(); renderHeader(); afterRender();
@@ -3069,6 +4311,11 @@
     }
   });
 
+  // Pendant le chrono : toucher n'importe où arrête
+  $('#chrono').addEventListener('pointerdown', e => {
+    if (chrono && chrono.phase === 'run' && !e.target.closest('[data-act="chrono-stop"]')) chronoStop();
+  });
+
   // On retient les niveaux de callisthénie ouverts / fermés à la main
   document.addEventListener('toggle', e => {
     const d = e.target;
@@ -3087,6 +4334,13 @@
   // Entrée dans un petit champ = valider (sans recharger la page)
   document.addEventListener('keydown', e => {
     const t = e.target;
+    // Écran de verrouillage : on peut taper le code au clavier
+    if (document.documentElement.classList.contains('locked')) {
+      if (/^[0-9]$/.test(e.key)) lockKey(e.key);
+      else if (e.key === 'Backspace') lockKey('del');
+      e.preventDefault();
+      return;
+    }
     if (e.key === 'Escape') {
       const open = [...document.querySelectorAll('.modal')].filter(mo => !mo.hidden);
       if (open.length) { open.forEach(mo => { mo.hidden = true; }); return; }
@@ -3122,6 +4376,70 @@
 
     if (type === 'sync') {
       connectSync(d.token, $('button[type="submit"]', form));
+      return;
+    }
+
+    if (type === 'cd') {
+      const name = String(d.name || '').trim();
+      const date = String(d.date || '');
+      if (!name || !/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast('Écris un nom et choisis une date.'); return; }
+      state.countdowns.push({ id: uid(), name, date });
+      cdForm = false;
+      save(); renderCountdowns();
+      return;
+    }
+
+    if (type === 'book') {
+      const title = String(d.name || '').trim();
+      if (!title) return;
+      const pk = picked.book && picked.book.title === title ? picked.book : null;
+      const id = uid();
+      state.books.push({ id, title, author: pk ? pk.author : '', cover: pk ? pk.cover : '', pages: pk ? pk.pages : 0, page: 0, status: 'reading', added: dateKey(new Date()) });
+      picked.book = null;
+      added.add(id);
+      save(); renderStudy(); afterRender();
+      $('#studyBody form[data-form="book"] [name="name"]').focus();
+      return;
+    }
+
+    if (type === 'study') {
+      const mins = Math.round(num(d.min, 0));
+      if (!(mins > 0 && mins <= 600)) { toast('Écris un nombre de minutes, par exemple 30'); return; }
+      markActive();
+      addStudy(mins);
+      toast(`+${mins} min de révision notées ✓`);
+      return;
+    }
+
+    if (type === 'weight') {
+      const kg = Math.round(num(d.kg, 0) * 10) / 10;
+      if (!(kg > 20 && kg < 400)) { toast('Écris ton poids en kg, par exemple 72,5'); return; }
+      state.weights[dateKey(new Date())] = kg;
+      markActive();
+      save(); renderGym(); afterRender();
+      toast(`${String(kg).replace('.', ',')} kg noté ✓`);
+      return;
+    }
+
+    if (type === 'lock-on') {
+      const c1 = String(d.code1 || ''), c2 = String(d.code2 || '');
+      if (!/^\d{4}$/.test(c1)) { toast('Le code doit faire 4 chiffres.'); return; }
+      if (c1 !== c2) { toast('Les deux codes ne sont pas pareils.'); return; }
+      sha(c1).then(h => {
+        try { localStorage.setItem(LOCK_KEY, h); } catch (err) { /* rien */ }
+        renderSettings();
+        toast("Code activé ✓ Il sera demandé à l'ouverture de l'appli.");
+      });
+      return;
+    }
+
+    if (type === 'lock-off') {
+      sha(String(d.code || '')).then(h => {
+        if (h !== localStorage.getItem(LOCK_KEY)) { toast("Ce n'est pas le bon code."); return; }
+        try { localStorage.removeItem(LOCK_KEY); } catch (err) { /* rien */ }
+        renderSettings();
+        toast('Code enlevé.');
+      });
       return;
     }
 
@@ -3181,7 +4499,9 @@
       const cur = num(d.cur, 0);
       const target = num(d.target, cur);
       const id = uid();
-      m.gym.lifts.push({ id, name, cur, start: cur, target, unit: String(d.unit || '').trim() });
+      const newLift = { id, name, cur, start: cur, target, unit: String(d.unit || '').trim() };
+      m.gym.lifts.push(newLift);
+      logLift(newLift);
       added.add(id);
       save(); renderGym(); renderHeader(); afterRender();
       $('#gymBody form [name="name"]').focus();
@@ -3249,14 +4569,22 @@
 
   // Au cas où on ferme la page pendant qu'on écrit une note
   window.addEventListener('pagehide', () => {
+    if (wiping) return;
     try { persistLocal(); } catch (e) { /* rien */ }
     flushSync();
   });
 
-  // On revient sur le site (autre onglet, autre appli) : on récupère la dernière version
+  // On revient sur le site (autre onglet, autre appli) : on récupère la dernière version,
+  // et on reverrouille si l'appli est restée cachée plus de 5 minutes
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') flushSync();
-    else syncNow();
+    if (document.visibilityState === 'hidden') {
+      hiddenAt = Date.now();
+      flushSync();
+    } else {
+      if (hiddenAt && Date.now() - hiddenAt > 5 * 60 * 1000) showLock();
+      tickTimer();
+      syncNow();
+    }
   });
   window.addEventListener('online', () => syncNow());
 
@@ -3273,7 +4601,10 @@
 
   /* ---------- Démarrage ---------- */
   applyTheme(state.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  applyPalette(prefs.palette);
+  if (hasLock()) showLock(); else document.documentElement.classList.remove('locked');
   setupTooltip();
+  tickTimer();   // reprend un minuteur lancé avant de fermer l'appli
   renderAll(0);
   setSyncStatus(sync.token ? 'busy' : 'off');
   if (sync.token) syncNow();

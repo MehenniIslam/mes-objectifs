@@ -1,5 +1,5 @@
 /* Service worker : permet d'installer le site comme une appli et de l'ouvrir sans internet. */
-const CACHE = 'mes-objectifs-v6';
+const CACHE = 'mes-objectifs-v7';
 const EXT_CACHE = 'mes-objectifs-ext';   // polices et affiches d'animes
 const SHELL = [
   './', 'index.html', 'style.css', 'cali.js', 'app.js', 'manifest.webmanifest',
@@ -23,8 +23,8 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
-  // Synchro GitHub et infos d'animes : toujours en direct
-  if (url.hostname === 'api.github.com' || url.hostname === 'graphql.anilist.co') return;
+  // Synchro GitHub, infos d'animes et recherche de livres : toujours en direct
+  if (url.hostname === 'api.github.com' || url.hostname === 'graphql.anilist.co' || url.hostname === 'openlibrary.org') return;
 
   // Fichiers du site : internet d'abord (pour avoir les mises à jour), sinon la copie gardée
   if (url.origin === self.location.origin) {

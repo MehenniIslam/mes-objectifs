@@ -17,6 +17,14 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Reem+Kufi:wght@700&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <script>
+    // Avant tout affichage : couleurs choisies et verrouillage si un code existe
+    try {
+      var p = JSON.parse(localStorage.getItem('mes-objectifs-reglages') || '{}');
+      if (p.palette && p.palette !== 'classique') document.documentElement.dataset.palette = p.palette;
+      if (localStorage.getItem('mes-objectifs-code')) document.documentElement.classList.add('locked');
+    } catch (e) { /* rien */ }
+  </script>
 </head>
 <body>
   <div class="bg-dots" aria-hidden="true"></div>
@@ -69,6 +77,9 @@
     <!-- ===== Quêtes de la semaine ===== -->
     <section class="quests" id="quests" aria-label="Quêtes de la semaine"></section>
 
+    <!-- ===== Comptes à rebours ===== -->
+    <section class="countdowns" id="countdowns" aria-label="Comptes à rebours"></section>
+
     <!-- ===== Barre d'outils ===== -->
     <nav class="toolbar">
       <button class="btn" data-act="today" id="todayBtn" hidden>↺ Revenir à ce mois</button>
@@ -78,9 +89,7 @@
       <span class="spacer"></span>
       <span class="saved-tag" id="savedTag" title="Chaque changement est enregistré tout seul dans ce navigateur">Enregistré automatiquement</span>
       <button class="btn sync-btn" data-act="sync-open" id="syncBtn" data-state="off">Synchro tél ↔ PC</button>
-      <button class="btn" data-act="theme" id="themeBtn">Mode nuit</button>
-      <button class="btn" data-act="export" title="Télécharge un fichier avec toutes tes données (copie de secours)">Sauvegarder un fichier</button>
-      <label class="btn" for="importFile" title="Recharge un fichier de sauvegarde">Charger</label>
+      <button class="btn" data-act="settings-open" title="Couleurs, mode nuit, code secret, sauvegarde">Réglages</button>
       <input type="file" id="importFile" accept="application/json,.json" hidden>
     </nav>
 
@@ -105,7 +114,15 @@
           <div class="panel-body" id="mangaBody"></div>
         </section>
 
-        <section class="panel" style="--i:4; --accent: var(--c-money); --o:7">
+        <section class="panel" style="--i:3; --accent: var(--c-study); --o:7">
+          <header class="panel-head">
+            <h2>Études</h2>
+            <span class="sfx">勉強</span>
+          </header>
+          <div class="panel-body" id="studyBody"></div>
+        </section>
+
+        <section class="panel" style="--i:4; --accent: var(--c-money); --o:8">
           <header class="panel-head">
             <h2>Argent</h2>
             <span class="chip" data-chip="money">—</span>
@@ -152,7 +169,7 @@
           <div class="panel-body" id="caliBody"></div>
         </section>
 
-        <section class="panel" style="--i:3; --accent: var(--c-todo); --o:8">
+        <section class="panel" style="--i:3; --accent: var(--c-todo); --o:9">
           <header class="panel-head">
             <h2>Autres objectifs</h2>
             <span class="chip" data-chip="todos">—</span>
@@ -161,7 +178,7 @@
           <div class="panel-body" id="todoBody"></div>
         </section>
 
-        <section class="panel panel-notes" style="--i:4; --accent: var(--c-notes); --o:9">
+        <section class="panel panel-notes" style="--i:4; --accent: var(--c-notes); --o:10">
           <header class="panel-head">
             <h2>Notes du mois</h2>
             <span class="sfx">メモ</span>
@@ -199,6 +216,59 @@
         <button type="button" class="x" data-act="modal-close" aria-label="Fermer">×</button>
       </header>
       <div class="modal-body" id="bilanBody"></div>
+    </div>
+  </div>
+
+  <!-- Réglages -->
+  <div class="modal" id="settingsModal" hidden role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modal-card" style="--accent: var(--c-todo)">
+      <header class="panel-head">
+        <h2 id="settingsTitle">Réglages</h2>
+        <span class="sfx">設定</span>
+        <button type="button" class="x" data-act="modal-close" aria-label="Fermer">×</button>
+      </header>
+      <div class="modal-body" id="settingsBody"></div>
+    </div>
+  </div>
+
+  <!-- Séance type en cours -->
+  <div class="modal" id="workoutModal" hidden role="dialog" aria-modal="true" aria-labelledby="workoutTitle">
+    <div class="modal-card" style="--accent: var(--c-gym)">
+      <header class="panel-head">
+        <h2 id="workoutTitle">Séance</h2>
+        <span class="sfx">練習</span>
+        <button type="button" class="x" data-act="modal-close" aria-label="Fermer">×</button>
+      </header>
+      <div class="modal-body" id="workoutBody"></div>
+    </div>
+  </div>
+
+  <!-- Chrono des figures à tenir -->
+  <div class="chrono" id="chrono" hidden role="dialog" aria-modal="true" aria-label="Chrono">
+    <div class="chrono-in" id="chronoBody"></div>
+  </div>
+
+  <!-- Minuteur (repos / révision) -->
+  <div class="timer-float" id="timerFloat" hidden role="timer" aria-live="off">
+    <span class="tf-label" id="tfLabel">Repos</span>
+    <b class="tf-time" id="tfTime">1:30</b>
+    <button type="button" class="tf-btn" data-act="timer-add" title="Ajouter 30 secondes">+30 s</button>
+    <button type="button" class="tf-btn" data-act="timer-stop" aria-label="Arrêter">×</button>
+  </div>
+
+  <!-- Écran de verrouillage (code secret) -->
+  <div class="lock" id="lock">
+    <div class="lock-in">
+      <span class="lock-kanji" aria-hidden="true">月</span>
+      <p class="lock-title">Entre ton code</p>
+      <div class="lock-dots" id="lockDots"><i></i><i></i><i></i><i></i></div>
+      <div class="keypad">
+        <button type="button" data-act="lock-key" data-v="1">1</button><button type="button" data-act="lock-key" data-v="2">2</button><button type="button" data-act="lock-key" data-v="3">3</button>
+        <button type="button" data-act="lock-key" data-v="4">4</button><button type="button" data-act="lock-key" data-v="5">5</button><button type="button" data-act="lock-key" data-v="6">6</button>
+        <button type="button" data-act="lock-key" data-v="7">7</button><button type="button" data-act="lock-key" data-v="8">8</button><button type="button" data-act="lock-key" data-v="9">9</button>
+        <span></span><button type="button" data-act="lock-key" data-v="0">0</button><button type="button" data-act="lock-key" data-v="del" aria-label="Effacer">⌫</button>
+      </div>
+      <button type="button" class="lock-forgot" data-act="lock-forgot">Code oublié ?</button>
     </div>
   </div>
 
