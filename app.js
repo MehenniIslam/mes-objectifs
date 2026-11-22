@@ -72,8 +72,31 @@
     lift: 25,         // objectif de perf atteint
     saveGoal: 30,     // objectif d'épargne du mois atteint
     per10eur: 1,      // 1 XP par tranche de 10 € mis de côté
-    perfect: 100      // mois validé à 100 %
+    perfect: 100,     // mois validé à 100 %
+    habit: 5,         // habitude faite un jour
+    review: 5,        // sourate révisée
+    chapter: 1,       // chapitre de manga lu
+    mangaGoal: 20,    // objectif de chapitres du mois atteint
+    mangaDone: 50,    // manga terminé
+    quest: 40         // quête de la semaine réussie
   };
+
+  // Animes et mangas partagent le même affichage
+  const KINDS = {
+    anime: { list: 'animes', unit: 'ÉP.', one: 'épisode', many: 'épisodes', short: 'ép.', body: '#animeBody', alType: 'ANIME', count: 'episodes', step: 12 },
+    manga: { list: 'mangas', unit: 'CH.', one: 'chapitre', many: 'chapitres', short: 'ch.', body: '#mangaBody', alType: 'MANGA', count: 'chapters', step: 20 }
+  };
+
+  // Habitudes proposées quand la liste est vide
+  const HABIT_IDEAS = [
+    { name: 'Prières', target: 5 },
+    { name: "Boire 1,5 L d'eau", target: 1 },
+    { name: 'Dormir avant minuit', target: 1 },
+    { name: 'Lire 10 min', target: 1 },
+    { name: 'Marcher 30 min', target: 1 }
+  ];
+  const QUEST_KEY = 'mes-objectifs-quetes';    // quêtes déjà fêtées sur cet appareil
+  const BADGE_KEY = 'mes-objectifs-succes';    // succès déjà fêtés sur cet appareil
   const LEVEL_KEY = 'mes-objectifs-niveau';   // dernier niveau vu sur cet appareil (pour l'animation)
   const levelNeed = l => 50 * l * (l + 1);    // XP total pour atteindre le niveau l
   const levelOf = xp => { let l = 0; while (levelNeed(l + 1) <= xp) l++; return l; };
@@ -123,7 +146,7 @@
   function emptyMonth() {
     return {
       animes: [], quranGoal: 0, gym: { goal: 12, days: [], lifts: [] }, todos: [], notes: '',
-      money: { saveGoal: 0, budget: 0, entries: [] }
+      money: { saveGoal: 0, budget: 0, entries: [] }, mangas: [], habits: {}
     };
   }
 
@@ -144,6 +167,8 @@
       ? m.money.entries.filter(e => e && typeof e === 'object' && num(e.amount, 0) > 0) : [];
     m.money.entries.forEach(e => { if (e.type === 'spend' && !e.cat) e.cat = 'other'; });
     if (!Array.isArray(m.money.subsDone)) delete m.money.subsDone;
+    m.mangas = Array.isArray(m.mangas) ? m.mangas : [];
+    m.habits = (m.habits && typeof m.habits === 'object' && !Array.isArray(m.habits)) ? m.habits : {};
     return m;
   }
 
@@ -159,6 +184,11 @@
     s.subs = Array.isArray(s.subs) ? s.subs.filter(x => x && typeof x === 'object') : [];
     s.watchlist = Array.isArray(s.watchlist) ? s.watchlist.filter(x => x && typeof x === 'object') : [];
     s.activity = (s.activity && typeof s.activity === 'object') ? s.activity : {};
+    s.habits = Array.isArray(s.habits) ? s.habits.filter(h => h && typeof h === 'object') : [];
+    s.daily = (s.daily && typeof s.daily === 'object') ? s.daily : {};   // épisodes, chapitres, objectifs du jour
+    s.quran.reviews = (s.quran.reviews && typeof s.quran.reviews === 'object') ? s.quran.reviews : {};   // date → sourates révisées
+    s.quran.learnedOn = (s.quran.learnedOn && typeof s.quran.learnedOn === 'object') ? s.quran.learnedOn : {};
+    s.questWeeks = (s.questWeeks && typeof s.questWeeks === 'object') ? s.questWeeks : {};   // quêtes tirées pour chaque semaine
     return s;
   }
 
@@ -203,7 +233,7 @@
   }
 
   function isEmpty(m) {
-    return !m || (!m.animes.length && !m.todos.length && !m.gym.lifts.length &&
+    return !m || (!m.animes.length && !m.mangas.length && !m.todos.length && !m.gym.lifts.length &&
       !m.gym.days.length && !m.quranGoal && !m.notes.trim() &&
       !m.money.entries.length && !m.money.saveGoal && !m.money.budget);
   }
@@ -234,9 +264,29 @@
     return j && j.target > 0 ? clamp01(jarSaved(id) / j.target) : 0;
   };
 
+  // Habitudes : nombre de fois coché un jour donné, et si c'est complet
+  const habitCount = (m, id, d) => (m && m.habits[id] && m.habits[id][d]) || 0;
+  const habitDone = (m, h, d) => habitCount(m, h.id, d) >= (h.target || 1);
+  function elapsedDays(k) {
+    const nowKey = keyOf(new Date());
+    if (k > nowKey) return 0;
+    if (k < nowKey) { const { y, m } = partsOf(k); return new Date(y, m, 0).getDate(); }
+    return new Date().getDate();
+  }
+  function habitsPct(m, k) {
+    const days = elapsedDays(k);
+    if (!state.habits.length || !days) return null;
+    let done = 0;
+    state.habits.forEach(h => { for (let d = 1; d <= days; d++) if (habitDone(m, h, d)) done++; });
+    return done / (state.habits.length * days);
+  }
+
   function sections(m, k = current) {
     const out = {};
     if (m.animes.length) out.anime = avg(m.animes.map(animePct));
+    if (m.mangas.length) out.manga = avg(m.mangas.map(animePct));
+    const hp = habitsPct(m, k);
+    if (hp !== null) out.habits = hp;
     if (m.quranGoal > 0) out.quran = clamp01(learnedIn(k) / m.quranGoal);
     const g = [];
     if (m.gym.goal > 0) g.push(clamp01(m.gym.days.length / m.gym.goal));
@@ -321,12 +371,13 @@
     if (lastGlobal !== null && lastGlobal < 100 && pct === 100) megaCelebration();
     lastGlobal = pct;
     renderHud();
+    renderQuests();
     updateInstallBtn();
   }
 
   /* ---------- Animes ---------- */
-  const picked = { anime: null, watch: null };     // anime choisi dans la liste de suggestions
-  const suggResults = { anime: [], watch: [] };
+  const picked = { anime: null, watch: null, manga: null };   // choisi dans la liste de suggestions
+  const suggResults = { anime: [], watch: [], manga: [] };
   let suggTimer = 0;
   let pendingAnimeRender = false;
 
@@ -378,7 +429,21 @@
     return `<p class="air">${esc(bits.join(' · '))}${behind > 0 ? ` <b class="behind">${behind} ép. dispo à regarder</b>` : ''}</p>`;
   }
 
-  function animeCard(a) {
+  // Ligne d'infos pour un manga : parution et chapitres à lire
+  function mangaLine(al, ch) {
+    if (!al) return '';
+    const bits = [];
+    if (al.status === 'RELEASING') bits.push('En cours de parution');
+    else if (al.status === 'FINISHED') bits.push(`Terminé${al.chapters ? ` · ${al.chapters} ch.` : ''}${al.volumes ? ` · ${al.volumes} tomes` : ''}`);
+    else if (al.status === 'NOT_YET_RELEASED') bits.push(`Sortie : ${fmtStart(al.start)}`);
+    else if (al.status === 'HIATUS') bits.push('En pause');
+    const behind = al.status === 'FINISHED' && al.chapters ? al.chapters - ch : 0;
+    if (!bits.length && behind <= 0) return '';
+    return `<p class="air">${esc(bits.join(' · '))}${behind > 0 ? ` <b class="behind">${behind} ch. à lire</b>` : ''}</p>`;
+  }
+
+  function animeCard(a, kind = 'anime') {
+    const K = KINDS[kind];
     const p = animePct(a);
     const done = p >= 1;
     const finished = a.total > 0 && a.ep >= a.total;
@@ -392,29 +457,29 @@
         ${a.rating ? `<b>${a.rating}/10</b>` : ''}
       </div>` : '';
     return `
-      <article class="card anime ${done ? 'is-done' : ''} ${added.has(a.id) ? 'is-new' : ''}" data-id="${a.id}">
+      <article class="card anime ${done ? 'is-done' : ''} ${added.has(a.id) ? 'is-new' : ''}" data-id="${a.id}" data-kind="${kind}">
         <div class="anime-row">
           ${coverImg(a.al, a.name)}
           <div class="anime-main">
             <div class="anime-top">
-              <input class="ghost name" data-act="anime-name" value="${esc(a.name)}" aria-label="Nom de l'anime">
+              <input class="ghost name" data-act="anime-name" value="${esc(a.name)}" aria-label="Nom">
               ${finished ? '<span class="tag">TERMINÉ</span>' : ''}
               <button class="x" data-act="anime-del" aria-label="Supprimer ${esc(a.name)}" title="Supprimer">×</button>
             </div>
-            ${airLine(a.al, a.ep)}
+            ${kind === 'manga' ? mangaLine(a.al, a.ep) : airLine(a.al, a.ep)}
             <div class="anime-mid">
-              <button class="step" data-act="anime-minus" aria-label="Retirer un épisode">−</button>
-              <div class="ep"><small>ÉP.</small><span class="ep-num">${a.ep}</span></div>
-              <button class="step plus" data-act="anime-plus" aria-label="J'ai vu un épisode de plus">+1</button>
+              <button class="step" data-act="anime-minus" aria-label="Retirer un ${K.one}">−</button>
+              <div class="ep"><small>${K.unit}</small><span class="ep-num">${a.ep}</span></div>
+              <button class="step plus" data-act="anime-plus" aria-label="Un ${K.one} de plus">+1</button>
               <div class="anime-goal">
-                <label>Objectif : ép. <input class="num-in" type="number" min="0" inputmode="numeric" data-act="anime-goal" value="${a.goal}"></label>
+                <label>Objectif : ${K.short} <input class="num-in" type="number" min="0" inputmode="numeric" data-act="anime-goal" value="${a.goal}"></label>
                 <label class="muted">sur <input class="num-in" type="number" min="0" inputmode="numeric" data-act="anime-total" value="${a.total || ''}" placeholder="?"> au total</label>
               </div>
             </div>
           </div>
         </div>
-        ${bar('anime-' + a.id, p)}
-        <div class="foot"><span>${seen} / ${need} épisode${need > 1 ? 's' : ''} ce mois</span><b>${Math.round(p * 100)}%</b></div>
+        ${bar(kind + '-' + a.id, p)}
+        <div class="foot"><span>${seen} / ${need} ${need > 1 ? K.many : K.one} ce mois</span><b>${Math.round(p * 100)}%</b></div>
         ${rating}
         ${done ? `<span class="hanko ${fresh.has(a.id) ? 'fresh' : ''}" aria-hidden="true">済</span>` : ''}
       </article>`;
@@ -483,7 +548,7 @@
   function renderAnime() {
     pendingAnimeRender = false;
     const m = M();
-    const cards = m.animes.map(animeCard).join('');
+    const cards = m.animes.map(a => animeCard(a, 'anime')).join('');
     const isNow = current === keyOf(new Date());
 
     const watch = state.watchlist.map(w => `
@@ -521,11 +586,148 @@
       </form>`;
   }
 
-  // Re-dessine les animes sans casser une saisie en cours
+  // Re-dessine les animes (et mangas) sans casser une saisie en cours
   function softRenderAnime() {
-    if ($('#animeBody').contains(document.activeElement)) { pendingAnimeRender = true; return; }
+    if ($('#animeBody').contains(document.activeElement) || $('#mangaBody').contains(document.activeElement)) {
+      pendingAnimeRender = true;
+      return;
+    }
     renderAnime();
+    renderManga();
     afterRender();
+  }
+
+  /* ---------- Mangas ---------- */
+  function renderManga() {
+    const m = M();
+    const cards = m.mangas.map(x => animeCard(x, 'manga')).join('');
+    $('#mangaBody').innerHTML =
+      (cards ? `<div class="stack">${cards}</div>`
+        : emptyBox('Aucun manga pour ce mois.', 'Tape le nom et choisis-le dans la liste : la couverture et le nombre de chapitres arrivent tout seuls.')) + `
+      <form class="add" data-form="manga" autocomplete="off">
+        ${suggestField('manga', 'Nom du manga')}
+        <input name="ep" type="number" min="0" inputmode="numeric" placeholder="Ch. actuel">
+        <input name="goal" type="number" min="0" inputmode="numeric" placeholder="Objectif ch.">
+        <input name="total" type="number" min="0" inputmode="numeric" placeholder="Total ch.">
+        <button class="btn primary" type="submit">Ajouter</button>
+      </form>`;
+  }
+
+  /* ---------- Habitudes du jour ---------- */
+  function setHabit(m, id, d, c) {
+    if (!m.habits[id]) m.habits[id] = {};
+    if (c > 0) m.habits[id][d] = c; else delete m.habits[id][d];
+    if (!Object.keys(m.habits[id]).length) delete m.habits[id];
+  }
+
+  function habitStreak(h) {
+    const d = new Date();
+    const at = x => habitDone(state.months[keyOf(x)], h, x.getDate());
+    if (!at(d)) d.setDate(d.getDate() - 1);
+    let n = 0;
+    while (n < 3660 && at(d)) { n++; d.setDate(d.getDate() - 1); }
+    return n;
+  }
+
+  function habitForm() {
+    return `
+      <form class="add" data-form="habit" autocomplete="off">
+        <input class="wide" name="name" placeholder="Nouvelle habitude" required maxlength="40">
+        <label class="day-lbl"><input name="target" type="number" min="1" max="10" value="1" inputmode="numeric"> fois / jour</label>
+        <button class="btn primary" type="submit">Ajouter</button>
+      </form>`;
+  }
+
+  function renderHabits() {
+    const oldScroll = $('#habitBody .hg-scroll');
+    const prevLeft = oldScroll && oldScroll.dataset.month === current ? oldScroll.scrollLeft : null;
+    drawHabits();
+    // Sur petit écran, la grille défile : on garde la position, ou on montre aujourd'hui
+    const sc = $('#habitBody .hg-scroll');
+    if (!sc) return;
+    sc.dataset.month = current;
+    if (prevLeft !== null) { sc.scrollLeft = prevLeft; return; }
+    const td = sc.querySelector('.hg-cell.today');
+    if (td) {
+      const over = td.getBoundingClientRect().right - sc.getBoundingClientRect().right;
+      if (over > 0) sc.scrollLeft += over + 90;
+    }
+  }
+
+  function drawHabits() {
+    const m = M();
+    const { y, m: mon } = partsOf(current);
+    const dim = new Date(y, mon, 0).getDate();
+    const now = new Date();
+    const nowKey = keyOf(now);
+    const isNow = nowKey === current;
+    const today = now.getDate();
+    const days = elapsedDays(current);
+    const ideasLeft = HABIT_IDEAS.map((h, i) => ({ h, i })).filter(({ h }) => !state.habits.some(x => x.name === h.name));
+
+    if (!state.habits.length) {
+      $('#habitBody').innerHTML =
+        emptyBox('Aucune habitude pour le moment.', 'Ce sont les petits trucs à faire tous les jours. Choisis-en dans la liste ou crée la tienne.') + `
+        <div class="habit-ideas">${HABIT_IDEAS.map((h, i) =>
+          `<button type="button" class="btn sm" data-act="habit-idea" data-i="${i}">+ ${esc(h.name)}${h.target > 1 ? ` (${h.target} fois)` : ''}</button>`).join('')}</div>
+        ${habitForm()}`;
+      return;
+    }
+
+    // Aujourd'hui : grosses cases à toucher
+    const todayHtml = isNow ? `
+      <div class="habit-today">${state.habits.map(h => {
+        const t = h.target || 1;
+        const c = habitCount(m, h.id, today);
+        const done = c >= t;
+        return `
+          <div class="h-card ${done ? 'done' : ''} ${fresh.has('h' + h.id) ? 'fresh' : ''}" data-id="${h.id}">
+            <button type="button" class="h-main" data-act="habit-tap" aria-pressed="${done}">
+              <span class="h-check" aria-hidden="true">済</span>
+              <span class="h-name">${esc(h.name)}</span>
+              ${t > 1 ? `<span class="h-count">${c}/${t}</span>` : ''}
+            </button>
+            ${t > 1 ? `<div class="h-dots">${Array.from({ length: t }, (_, i) =>
+              `<button type="button" class="${i < c ? 'on' : ''}" data-act="habit-dot" data-v="${i + 1}" aria-label="${i + 1} sur ${t}"></button>`).join('')}</div>` : ''}
+          </div>`;
+      }).join('')}</div>` : '';
+
+    // Le mois : une ligne par habitude, une case par jour
+    const head = `<div class="hg-row hg-head"><span class="hg-name"></span>${Array.from({ length: dim }, (_, i) =>
+      `<span class="hg-day ${isNow && i + 1 === today ? 'today' : ''}">${i + 1}</span>`).join('')}<span class="hg-stat"></span></div>`;
+    const rows = state.habits.map(h => {
+      const t = h.target || 1;
+      let doneDays = 0;
+      const cells = Array.from({ length: dim }, (_, i) => {
+        const d = i + 1;
+        const c = habitCount(m, h.id, d);
+        const future = current > nowKey || (isNow && d > today);
+        if (c >= t) doneDays++;
+        const cls = c >= t ? 'full' : c > 0 ? 'part' : '';
+        return `<button type="button" class="hg-cell ${cls} ${isNow && d === today ? 'today' : ''}" data-act="habit-cell" data-day="${d}"
+          ${future ? 'disabled' : ''} title="${d} ${MOIS_COURT[mon - 1]} : ${c}/${t}" aria-label="${d} ${MOIS_COURT[mon - 1]}"
+          ${cls === 'part' ? `style="--p:${Math.round((c / t) * 100)}%"` : ''}></button>`;
+      }).join('');
+      const st = habitStreak(h);
+      return `
+        <div class="hg-row" data-id="${h.id}">
+          <span class="hg-name">
+            <input class="ghost" data-act="habit-name" value="${esc(h.name)}" aria-label="Nom de l'habitude" maxlength="40">
+            <button type="button" class="x" data-act="habit-del" aria-label="Supprimer ${esc(h.name)}" title="Supprimer">×</button>
+          </span>
+          ${cells}
+          <span class="hg-stat"><b>${doneDays}</b>/${days || dim}${st ? ` <span class="mini-flame">${FLAME}${st}</span>` : ''}</span>
+        </div>`;
+    }).join('');
+
+    $('#habitBody').innerHTML = `
+      ${todayHtml}
+      <h3 class="sub">${isNow ? 'Le mois' : 'Le mois en cases'}</h3>
+      <div class="hg-scroll"><div class="hg" style="--days:${dim}">${head}${rows}</div></div>
+      <p class="hint">Clique sur une case pour cocher ou décocher un jour. Le nombre à droite = jours réussis.</p>
+      ${habitForm()}
+      ${ideasLeft.length ? `<div class="habit-ideas">${ideasLeft.map(({ h, i }) =>
+        `<button type="button" class="btn sm" data-act="habit-idea" data-i="${i}">+ ${esc(h.name)}${h.target > 1 ? ` (${h.target} fois)` : ''}</button>`).join('')}</div>` : ''}`;
   }
 
   /* ---------- Sourates ---------- */
@@ -551,6 +753,7 @@
       </div>
       ${bar('quran-' + current, p)}
       ${m.quranGoal > 0 ? '' : '<p class="hint">Écris combien de sourates tu veux apprendre ce mois-ci (à côté de « ce mois »).</p>'}
+      ${reviewHtml()}
       <div class="q-tools">
         <input class="search" type="search" data-act="quran-search" placeholder="Chercher (nom ou numéro)…" value="${esc(quranSearch)}" aria-label="Chercher une sourate">
         <div class="seg" role="group" aria-label="Filtre">
@@ -595,6 +798,58 @@
 
     grid.innerHTML = html || '<p class="empty-line">Aucune sourate trouvée.</p>';
     grid.scrollTop = scroll;
+  }
+
+  /* ---------- Révision des sourates ---------- */
+  function lastReviews() {
+    const last = {};
+    Object.keys(state.quran.reviews).sort().forEach(d => (state.quran.reviews[d] || []).forEach(n => { last[n] = d; }));
+    return last;
+  }
+
+  const daysSince = dk => Math.round((new Date(dateKey(new Date()) + 'T12:00:00') - new Date(dk + 'T12:00:00')) / 86400000);
+  const mondayKey = d => { const x = new Date(d); x.setHours(12, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return dateKey(x); };
+
+  // Les 7 dates (lundi → dimanche) de la semaine qui commence au lundi "mk"
+  function weekDates(mk) {
+    const start = new Date(mk + 'T12:00:00');
+    return Array.from({ length: 7 }, (_, i) => { const x = new Date(start); x.setDate(start.getDate() + i); return dateKey(x); });
+  }
+
+  function reviewHtml() {
+    const learned = Object.keys(state.quran.learned).map(Number);
+    if (!learned.length) {
+      return '<p class="hint review-empty">Quand tu auras appris des sourates, je te proposerai ici celles à réviser.</p>';
+    }
+    const last = lastReviews();
+    const today = dateKey(new Date());
+    const todayList = state.quran.reviews[today] || [];
+    const ref = n => last[n] || state.quran.learnedOn[n] || (state.quran.learned[n] + '-01');
+    const todo = learned.filter(n => !todayList.includes(n))
+      .sort((a, b) => (ref(a) < ref(b) ? -1 : ref(a) > ref(b) ? 1 : b - a))
+      .slice(0, 5);
+    const week = weekDates(mondayKey(new Date())).reduce((t, d) => t + (state.quran.reviews[d] || []).length, 0);
+
+    return `
+      <div class="review">
+        <div class="review-head">
+          <b>À réviser</b>
+          <span class="hint">cette semaine : ${week} révision${week > 1 ? 's' : ''}</span>
+        </div>
+        ${todo.length ? `<div class="review-list">${todo.map(n => {
+          const l = last[n];
+          const ago = l ? daysSince(l) : null;
+          const when = l ? (ago <= 0 ? "aujourd'hui" : ago === 1 ? 'hier' : `il y a ${ago} jours`) : 'jamais révisée';
+          return `
+            <div class="review-item ${l && ago < 7 ? '' : 'late'}">
+              <b class="r-num">${n}</b>
+              <span class="r-name">${SOURATES[n - 1]}<small>${when}</small></span>
+              <button type="button" class="btn sm" data-act="review" data-n="${n}">✓ Révisée</button>
+            </div>`;
+        }).join('')}</div>` : '<p class="hint">Tout est révisé aujourd\'hui, bravo !</p>'}
+        ${todayList.length ? `<p class="review-today">Révisées aujourd'hui : ${todayList.map(n =>
+          `<button type="button" class="chip-undo" data-act="review" data-n="${n}" title="Annuler cette révision">${SOURATES[n - 1]} ×</button>`).join(' ')}</p>` : ''}
+      </div>`;
   }
 
   /* ---------- Salle ---------- */
@@ -927,7 +1182,7 @@
   /* =========================================================
      AniList : affiches, nombre d'épisodes, dates de sortie
      ========================================================= */
-  const AL_FIELDS = 'id title { romaji english userPreferred } coverImage { large medium } episodes status format seasonYear nextAiringEpisode { airingAt episode } startDate { year month day }';
+  const AL_FIELDS = 'id type title { romaji english userPreferred } coverImage { large medium } episodes chapters volumes status format seasonYear nextAiringEpisode { airingAt episode } startDate { year month day }';
   const alCache = new Map();
   let alChain = Promise.resolve();
   let alLast = 0;
@@ -939,6 +1194,8 @@
       title: (m.title && (m.title.english || m.title.romaji || m.title.userPreferred)) || '',
       cover: (m.coverImage && (m.coverImage.large || m.coverImage.medium)) || '',
       episodes: m.episodes || 0,
+      chapters: m.chapters || 0,
+      volumes: m.volumes || 0,
       status: m.status || '',
       next: m.nextAiringEpisode ? { at: m.nextAiringEpisode.airingAt, ep: m.nextAiringEpisode.episode } : null,
       start: m.startDate ? { y: m.startDate.year, m: m.startDate.month, d: m.startDate.day } : null,
@@ -969,12 +1226,12 @@
     return p;
   }
 
-  async function alSearch(text) {
-    const k = norm(text);
+  async function alSearch(text, type = 'ANIME') {
+    const k = type + ':' + norm(text);
     if (alCache.has(k)) return alCache.get(k);
     const d = await alQuery(
-      `query ($s: String) { Page(perPage: 6) { media(search: $s, type: ANIME, sort: SEARCH_MATCH, isAdult: false) { ${AL_FIELDS} } } }`,
-      { s: text });
+      `query ($s: String, $t: MediaType) { Page(perPage: 6) { media(search: $s, type: $t, sort: SEARCH_MATCH, isAdult: false) { ${AL_FIELDS} } } }`,
+      { s: text, t: type });
     const list = ((d && d.Page && d.Page.media) || []).map(toAl);
     alCache.set(k, list);
     return list;
@@ -986,23 +1243,27 @@
     alBusy = true;
     let changed = false;
     try {
-      const pool = () => [...M().animes, ...state.watchlist];
+      const mangas = new Set(M().mangas);
+      const pool = () => [...M().animes, ...state.watchlist, ...M().mangas];
       for (const x of pool().filter(a => !a.al && !a.alTried).slice(0, 8)) {
+        const isManga = mangas.has(x);
         try {
-          const r = await alSearch(x.name);
+          const r = await alSearch(x.name, isManga ? 'MANGA' : 'ANIME');
           x.alTried = true;
           if (r[0]) {
             x.al = r[0];
-            if ('ep' in x && !x.total && r[0].episodes) x.total = r[0].episodes;
+            const n = isManga ? r[0].chapters : r[0].episodes;
+            if ('ep' in x && !x.total && n) x.total = n;
           }
           changed = true;
         } catch (e) { break; }
       }
+      // Animes : toutes les 6 h (ou dès qu'un épisode est sorti). Mangas : une fois par jour.
       const stale = pool().filter(a => a.al && a.al.id && a.al.status !== 'FINISHED' &&
-        (Date.now() - (a.al.at || 0) > 6 * 3600e3 || (a.al.next && a.al.next.at * 1000 < Date.now())));
+        (Date.now() - (a.al.at || 0) > (mangas.has(a) ? 24 : 6) * 3600e3 || (a.al.next && a.al.next.at * 1000 < Date.now())));
       const ids = [...new Set(stale.map(a => a.al.id))].slice(0, 50);
       if (ids.length) {
-        const d = await alQuery(`query ($ids: [Int]) { Page(perPage: 50) { media(id_in: $ids, type: ANIME) { ${AL_FIELDS} } } }`, { ids });
+        const d = await alQuery(`query ($ids: [Int]) { Page(perPage: 50) { media(id_in: $ids) { ${AL_FIELDS} } } }`, { ids });
         const byId = new Map(((d && d.Page && d.Page.media) || []).map(m => [m.id, toAl(m)]));
         stale.forEach(a => { const n = byId.get(a.al.id); if (n) { a.al = n; changed = true; } });
       }
@@ -1023,7 +1284,7 @@
     if (text.length < 2) { box.hidden = true; return; }
     suggTimer = setTimeout(async () => {
       let list = [];
-      try { list = await alSearch(text); } catch (e) { box.hidden = true; return; }
+      try { list = await alSearch(text, type === 'manga' ? 'MANGA' : 'ANIME'); } catch (e) { box.hidden = true; return; }
       if (input.value.trim() !== text || document.activeElement !== input) return;
       suggResults[type] = list;
       if (!list.length) {
@@ -1032,7 +1293,8 @@
         box.innerHTML = list.map((a, i) => `
           <button type="button" class="sugg-item" data-act="sugg-pick" data-type="${type}" data-i="${i}">
             ${coverImg(a, a.title, 'cover xs')}
-            <span><b>${esc(a.title)}</b><small>${[a.year, a.episodes ? a.episodes + ' ép.' : '', a.fmt === 'MOVIE' ? 'film' : ''].filter(Boolean).join(' · ')}</small></span>
+            <span><b>${esc(a.title)}</b><small>${[a.year, a.episodes ? a.episodes + ' ép.' : '', a.chapters ? a.chapters + ' ch.' : '',
+              a.fmt === 'MOVIE' ? 'film' : a.fmt === 'NOVEL' ? 'roman' : a.fmt === 'ONE_SHOT' ? 'one-shot' : ''].filter(Boolean).join(' · ')}</small></span>
           </button>`).join('');
       }
       box.hidden = false;
@@ -1060,9 +1322,12 @@
     const today = dateKey(new Date());
     const set = new Set(Object.keys(state.activity));
     allGymDates().forEach(d => set.add(d));
-    Object.entries(state.months).forEach(([k, m]) => m.money.entries.forEach(e => {
-      if (!e.sub) set.add(`${k}-${String(e.day).padStart(2, '0')}`);
-    }));
+    Object.entries(state.months).forEach(([k, m]) => {
+      m.money.entries.forEach(e => { if (!e.sub) set.add(`${k}-${String(e.day).padStart(2, '0')}`); });
+      Object.values(m.habits).forEach(days => Object.keys(days).forEach(d => set.add(`${k}-${String(d).padStart(2, '0')}`)));
+    });
+    Object.keys(state.daily).forEach(d => set.add(d));
+    Object.keys(state.quran.reviews).forEach(d => set.add(d));
     return new Set([...set].filter(d => d <= today));
   }
 
@@ -1112,13 +1377,25 @@
   }
 
   function computeXP() {
-    const p = { session: 0, surah: 0, episode: 0, animeGoal: 0, animeDone: 0, todo: 0, lift: 0, saveGoal: 0, saved: 0, perfect: 0 };
+    const p = {
+      session: 0, surah: 0, episode: 0, animeGoal: 0, animeDone: 0, todo: 0, lift: 0, saveGoal: 0, saved: 0, perfect: 0,
+      habit: 0, review: 0, chapter: 0, mangaGoal: 0, mangaDone: 0, quest: 0
+    };
     Object.entries(state.months).forEach(([k, m]) => {
       p.session += m.gym.days.length;
       m.animes.forEach(a => {
         p.episode += Math.max(0, a.ep - a.start);
         if (a.total > 0 && a.ep >= a.total) p.animeDone++;
         else if (a.goal > a.start && a.ep >= a.goal) p.animeGoal++;
+      });
+      m.mangas.forEach(a => {
+        p.chapter += Math.max(0, a.ep - a.start);
+        if (a.total > 0 && a.ep >= a.total) p.mangaDone++;
+        else if (a.goal > a.start && a.ep >= a.goal) p.mangaGoal++;
+      });
+      state.habits.forEach(h => {
+        const days = m.habits[h.id];
+        if (days) Object.keys(days).forEach(d => { if (days[d] >= (h.target || 1)) p.habit++; });
       });
       p.todo += m.todos.filter(t => t.done).length;
       p.lift += m.gym.lifts.filter(l => l.target !== l.start && liftPct(l) >= 1).length;
@@ -1128,15 +1405,240 @@
       if (monthPct(m, k) >= 100) p.perfect++;
     });
     p.surah = learnedTotal();
+    p.review = Object.values(state.quran.reviews).reduce((t, l) => t + l.length, 0);
+    p.quest = questsDoneTotal();
     const xp = p.session * XP.session + p.surah * XP.surah + p.episode * XP.episode +
       p.animeGoal * XP.animeGoal + p.animeDone * XP.animeDone + p.todo * XP.todo + p.lift * XP.lift +
-      p.saveGoal * XP.saveGoal + Math.floor(p.saved / 10) * XP.per10eur + p.perfect * XP.perfect;
+      p.saveGoal * XP.saveGoal + Math.floor(p.saved / 10) * XP.per10eur + p.perfect * XP.perfect +
+      p.habit * XP.habit + p.review * XP.review + p.chapter * XP.chapter +
+      p.mangaGoal * XP.mangaGoal + p.mangaDone * XP.mangaDone + p.quest * XP.quest;
     return { xp, p };
   }
 
+  /* ---------- Quêtes de la semaine ---------- */
+  const QUEST_POOL = [
+    { id: 'gym', need: 'gym', target: () => gymWeeks().target, label: t => `Va ${t} fois à la salle`, m: c => c.gym },
+    { id: 'review', need: 'quran', target: () => 5, label: t => `Révise ${t} sourates`, m: c => c.review },
+    { id: 'learn', need: 'quran', target: () => 1, label: () => 'Apprends une nouvelle sourate', m: c => c.learn },
+    { id: 'ep', need: 'anime', target: () => 6, label: t => `Regarde ${t} épisodes`, m: c => c.ep },
+    { id: 'ch', need: 'manga', target: () => 20, label: t => `Lis ${t} chapitres de manga`, m: c => c.ch },
+    { id: 'habits', need: 'habits', target: () => 4, label: t => `Fais toutes tes habitudes ${t} jours`, m: c => c.habits },
+    { id: 'save', need: 'money', target: () => 20, label: t => `Mets ${eur(t)} de côté`, m: c => c.save, fmt: v => eur(v) },
+    { id: 'todo', need: 'todos', target: () => 3, label: t => `Coche ${t} autres objectifs`, m: c => c.todo },
+    { id: 'active', need: null, target: () => 5, label: t => `Sois actif ${t} jours dans la semaine`, m: c => c.active }
+  ];
+
+  // Ce que tu utilises déjà sur le site (pour te proposer des quêtes qui te parlent)
+  function usedParts() {
+    const months = Object.values(state.months);
+    return {
+      gym: allGymDates().length > 0,
+      quran: learnedTotal() > 0,
+      anime: state.watchlist.length > 0 || months.some(m => m.animes.length),
+      manga: months.some(m => m.mangas.length),
+      habits: state.habits.length > 0,
+      money: months.some(m => m.money.entries.some(e => e.type === 'save') || m.money.saveGoal > 0),
+      todos: months.some(m => m.todos.length)
+    };
+  }
+
+  // Tirage au sort fixé par la semaine : tous tes appareils ont les mêmes quêtes
+  function seeded(str) {
+    let h = 1779033703 ^ str.length;
+    for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+    return () => {
+      h = Math.imul(h ^ (h >>> 16), 2246822507);
+      h = Math.imul(h ^ (h >>> 13), 3266489909);
+      return ((h ^= h >>> 16) >>> 0) / 4294967296;
+    };
+  }
+
+  function weekCounts(mk, act) {
+    const dates = weekDates(mk);
+    const gymSet = new Set(allGymDates());
+    const c = { gym: 0, review: 0, learn: 0, ep: 0, ch: 0, habits: 0, save: 0, todo: 0, active: 0 };
+    const learnDays = Object.values(state.quran.learnedOn);
+    dates.forEach(d => {
+      const k = d.slice(0, 7);
+      const day = Number(d.slice(8));
+      const m = state.months[k];
+      if (gymSet.has(d)) c.gym++;
+      c.review += (state.quran.reviews[d] || []).length;
+      c.learn += learnDays.filter(x => x === d).length;
+      const log = state.daily[d] || {};
+      c.ep += log.ep || 0;
+      c.ch += log.ch || 0;
+      c.todo += log.todo || 0;
+      if (m && state.habits.length && state.habits.every(h => habitDone(m, h, day))) c.habits++;
+      if (m) c.save += m.money.entries.reduce((t, e) => t + (e.type === 'save' && e.day === day ? e.amount : 0), 0);
+      if (act.has(d)) c.active++;
+    });
+    c.save = round2(c.save);
+    return c;
+  }
+
+  function questsFor(mk, used, act) {
+    let ids = state.questWeeks[mk];
+    if (!Array.isArray(ids) || ids.length !== 3) {
+      const rnd = seeded('quetes-' + mk);
+      const pool = QUEST_POOL.map(q => ({ q, r: rnd() })).sort((a, b) => a.r - b.r).map(x => x.q);
+      ids = [...pool.filter(q => !q.need || used[q.need]), ...pool.filter(q => q.need && !used[q.need])].slice(0, 3).map(q => q.id);
+      // Les quêtes de la semaine en cours sont gardées : elles ne changent plus jusqu'à lundi
+      if (mk === mondayKey(new Date())) {
+        state.questWeeks[mk] = ids;
+        Object.keys(state.questWeeks).sort().slice(0, -12).forEach(k => delete state.questWeeks[k]);
+        try { persistLocal(); } catch (e) { /* rien */ }
+      }
+    }
+    const c = weekCounts(mk, act);
+    return ids.map(id => QUEST_POOL.find(q => q.id === id)).filter(Boolean).map(q => {
+      const target = q.target();
+      const value = q.m(c);
+      return { q, target, value, done: value >= target };
+    });
+  }
+
+  function questsDoneTotal() {
+    const act = activeDays();
+    if (!act.size) return 0;
+    const used = usedParts();
+    const first = [...act].sort()[0];
+    const thisWeek = mondayKey(new Date());
+    let mk = mondayKey(new Date(first + 'T12:00:00'));
+    let n = 0;
+    for (let i = 0; i < 520 && mk <= thisWeek; i++) {
+      n += questsFor(mk, used, act).filter(x => x.done).length;
+      const next = new Date(mk + 'T12:00:00');
+      next.setDate(next.getDate() + 7);
+      mk = dateKey(next);
+    }
+    return n;
+  }
+
+  function renderQuests() {
+    const mk = mondayKey(new Date());
+    const list = questsFor(mk, usedParts(), activeDays());
+    const left = 7 - ((new Date().getDay() + 6) % 7);
+    $('#quests').innerHTML = `
+      <div class="quests-head">
+        <h3>Quêtes de la semaine <span class="jp" lang="ja">クエスト</span></h3>
+        <span class="hint">${left > 1 ? `encore ${left} jours` : 'dernier jour !'} · +${XP.quest} XP chacune</span>
+      </div>
+      <div class="quest-list">${list.map(({ q, target, value, done }) => {
+        const f = q.fmt || (v => String(v));
+        return `
+          <div class="quest ${done ? 'done' : ''}" data-quest="${q.id}">
+            <span class="q-icon" aria-hidden="true">${done ? '済' : '?'}</span>
+            <div class="q-main">
+              <b>${esc(q.label(target))}</b>
+              <span class="xp-bar"><i style="width:${clamp01(value / target) * 100}%"></i></span>
+              <small>${esc(f(Math.min(value, target)))} / ${esc(f(target))}</small>
+            </div>
+            <span class="q-xp">+${XP.quest}</span>
+          </div>`;
+      }).join('')}</div>`;
+
+    // On fête une quête réussie une seule fois (par appareil)
+    let seen = null;
+    try { seen = JSON.parse(localStorage.getItem(QUEST_KEY) || 'null'); } catch (e) { /* rien */ }
+    const doneIds = list.filter(x => x.done).map(x => `${mk}:${x.q.id}`);
+    if (!Array.isArray(seen)) seen = null;
+    const fresh2 = seen ? doneIds.filter(id => !seen.includes(id)) : [];
+    const keep = [...new Set([...(seen || []), ...doneIds])].filter(id => id >= mk.slice(0, 7));
+    try { localStorage.setItem(QUEST_KEY, JSON.stringify(keep)); } catch (e) { /* rien */ }
+    fresh2.forEach((id, i) => {
+      const qid = id.split(':')[1];
+      const item = list.find(x => x.q.id === qid);
+      setTimeout(() => {
+        celebrate($(`#quests [data-quest="${qid}"]`), 'クエスト完了!');
+        toast(`Quête réussie : ${item.q.label(item.target)} (+${XP.quest} XP)`);
+      }, 300 + i * 900);
+    });
+  }
+
+  /* ---------- Succès ---------- */
+  const BADGES = [
+    { id: 'first', kanji: '初', name: 'Premier pas', desc: 'Gagner tes premiers XP', v: s => s.xp, goal: 1 },
+    { id: 'surah1', kanji: '読', name: 'Première sourate', desc: 'Apprendre 1 sourate', v: s => s.surahs, goal: 1 },
+    { id: 'surah10', kanji: '十', name: 'Dix sourates', desc: 'Apprendre 10 sourates', v: s => s.surahs, goal: 10 },
+    { id: 'juzamma', kanji: '暗', name: "Juz' Amma", desc: 'Apprendre les sourates 78 à 114', v: s => s.juzAmma, goal: 37 },
+    { id: 'surah114', kanji: '全', name: 'Le Coran entier', desc: 'Apprendre les 114 sourates', v: s => s.surahs, goal: 114 },
+    { id: 'review20', kanji: '復', name: 'Bonne mémoire', desc: 'Faire 20 révisions', v: s => s.reviews, goal: 20 },
+    { id: 'gym10', kanji: '鉄', name: 'Habitué de la salle', desc: 'Faire 10 séances', v: s => s.sessions, goal: 10 },
+    { id: 'gym50', kanji: '筋', name: 'Machine', desc: 'Faire 50 séances', v: s => s.sessions, goal: 50 },
+    { id: 'gymMonth', kanji: '勝', name: 'Mois de fer', desc: 'Atteindre ton objectif de séances sur un mois', v: s => s.gymMonths, goal: 1 },
+    { id: 'ep100', kanji: '百', name: 'Cent épisodes', desc: 'Regarder 100 épisodes', v: s => s.episodes, goal: 100 },
+    { id: 'ep500', kanji: '観', name: 'Otaku confirmé', desc: 'Regarder 500 épisodes', v: s => s.episodes, goal: 500 },
+    { id: 'animeDone', kanji: '完', name: "Jusqu'au bout", desc: 'Finir un anime', v: s => s.animesDone, goal: 1 },
+    { id: 'anime5', kanji: '五', name: 'Collectionneur', desc: 'Finir 5 animes', v: s => s.animesDone, goal: 5 },
+    { id: 'ch100', kanji: '頁', name: 'Grand lecteur', desc: 'Lire 100 chapitres de manga', v: s => s.chapters, goal: 100 },
+    { id: 'save100', kanji: '金', name: 'Petite fourmi', desc: 'Mettre 100 € de côté', v: s => s.saved, goal: 100, money: true },
+    { id: 'save1000', kanji: '富', name: 'Trésor', desc: 'Mettre 1 000 € de côté', v: s => s.saved, goal: 1000, money: true },
+    { id: 'jar', kanji: '貯', name: 'Projet financé', desc: 'Remplir une cagnotte', v: s => s.jarsFull, goal: 1 },
+    { id: 'budget', kanji: '守', name: 'Budget tenu', desc: 'Finir un mois sans dépasser ton budget', v: s => s.budgetMonths, goal: 1 },
+    { id: 'streak7', kanji: '火', name: 'En feu', desc: "7 jours actifs d'affilée", v: s => s.bestStreak, goal: 7 },
+    { id: 'streak30', kanji: '炎', name: 'Inarrêtable', desc: "30 jours actifs d'affilée", v: s => s.bestStreak, goal: 30 },
+    { id: 'habit30', kanji: '習', name: 'Discipline', desc: 'Réussir 30 habitudes', v: s => s.habits, goal: 30 },
+    { id: 'quest5', kanji: '冒', name: 'Aventurier', desc: 'Réussir 5 quêtes', v: s => s.quests, goal: 5 },
+    { id: 'perfect', kanji: '極', name: 'Mois parfait', desc: 'Finir un mois à 100 %', v: s => s.perfect, goal: 1 },
+    { id: 'lvl10', kanji: '侍', name: 'Samouraï', desc: 'Atteindre le niveau 10', v: s => s.level, goal: 10 }
+  ];
+
+  function badgeStats(xpInfo) {
+    const { xp, p } = xpInfo || computeXP();
+    const nowKey = keyOf(new Date());
+    return {
+      xp,
+      level: levelOf(xp),
+      surahs: p.surah,
+      reviews: p.review,
+      sessions: p.session,
+      episodes: p.episode,
+      animesDone: p.animeDone,
+      chapters: p.chapter,
+      saved: totalSaved(),
+      habits: p.habit,
+      quests: p.quest,
+      perfect: p.perfect,
+      juzAmma: Array.from({ length: 37 }, (_, i) => 78 + i).filter(n => state.quran.learned[n]).length,
+      gymMonths: Object.values(state.months).filter(m => m.gym.goal > 0 && m.gym.days.length >= m.gym.goal).length,
+      jarsFull: state.jars.filter(j => jarPct(j.id) >= 1).length,
+      budgetMonths: Object.entries(state.months).filter(([k, m]) => {
+        const spent = moneySum(m.money, 'spend');
+        return k < nowKey && m.money.budget > 0 && spent > 0 && spent <= m.money.budget;
+      }).length,
+      bestStreak: streaks().best
+    };
+  }
+
+  const badgeIcon = (b, ok) => `<span class="badge ${ok ? 'ok' : ''}" aria-hidden="true">${ok ? b.kanji : '?'}</span>`;
+
+  function checkBadges(stats) {
+    const ok = BADGES.filter(b => b.v(stats) >= b.goal);
+    $('#badgeCount').textContent = ok.length;
+    let seen = null;
+    try { seen = JSON.parse(localStorage.getItem(BADGE_KEY) || 'null'); } catch (e) { /* rien */ }
+    const ids = ok.map(b => b.id);
+    try { localStorage.setItem(BADGE_KEY, JSON.stringify([...new Set([...(Array.isArray(seen) ? seen : []), ...ids])])); } catch (e) { /* rien */ }
+    if (!Array.isArray(seen)) return;   // première fois : on ne fête pas tout d'un coup
+    const nw = ok.filter(b => !seen.includes(b.id));
+    if (!nw.length) return;
+    const b = nw[0];
+    setTimeout(() => {
+      const box = overlay(`
+        <span class="jp">実績解除!</span>
+        ${badgeIcon(b, true).replace('class="badge ok"', 'class="badge ok big"')}
+        <span class="lv">${esc(b.name)}</span>
+        <span class="new-rank">${esc(b.desc)}${nw.length > 1 ? ` · et ${nw.length - 1} autre${nw.length > 2 ? 's' : ''} !` : ''}</span>`, 12);
+      if (!box) toast(`Succès débloqué : ${b.name} !`);
+    }, 1100);
+  }
+
   function renderHud() {
-    const { xp } = computeXP();
+    const xpInfo = computeXP();
+    const { xp } = xpInfo;
     const lvl = levelOf(xp);
+    checkBadges(badgeStats(xpInfo));
     const rank = rankOf(lvl);
     const base = levelNeed(lvl);
     const next = levelNeed(lvl + 1);
@@ -1275,18 +1777,23 @@
         sessions: m ? m.gym.days.length : 0,
         surahs: learnedIn(k),
         episodes: m ? m.animes.reduce((t, a) => t + Math.max(0, a.ep - a.start), 0) : 0,
+        chapters: m ? m.mangas.reduce((t, a) => t + Math.max(0, a.ep - a.start), 0) : 0,
         saved: m ? moneySum(m.money, 'save') : 0,
         spent: m ? moneySum(m.money, 'spend') : 0
       };
     });
     const col = f => rows.map(f);
 
-    const { xp, p } = computeXP();
+    const xpInfo = computeXP();
+    const { xp, p } = xpInfo;
     const lvl = levelOf(xp);
     const rank = rankOf(lvl);
     const base = levelNeed(lvl);
     const next = levelNeed(lvl + 1);
     const nextRank = RANKS.find(r => r.lvl > lvl);
+    const bs = badgeStats(xpInfo);
+    const okCount = BADGES.filter(b => b.v(bs) >= b.goal).length;
+    const hasManga = Object.values(state.months).some(m => m.mangas.length);
     const st = streaks();
     const gw = gymWeeks();
 
@@ -1300,7 +1807,13 @@
       ['Objectifs de perf atteints', p.lift, XP.lift],
       ["Objectifs d'épargne atteints", p.saveGoal, XP.saveGoal],
       ['Tranches de 10 € mises de côté', Math.floor(p.saved / 10), XP.per10eur],
-      ['Mois validés à 100 %', p.perfect, XP.perfect]
+      ['Mois validés à 100 %', p.perfect, XP.perfect],
+      ['Habitudes réussies', p.habit, XP.habit],
+      ['Sourates révisées', p.review, XP.review],
+      ['Chapitres de manga lus', p.chapter, XP.chapter],
+      ["Objectifs de chapitres atteints", p.mangaGoal, XP.mangaGoal],
+      ['Mangas terminés', p.mangaDone, XP.mangaDone],
+      ['Quêtes réussies', p.quest, XP.quest]
     ].filter(r => r[1] > 0);
 
     // Animes terminés (tous les mois)
@@ -1332,12 +1845,25 @@
         <div class="b-card"><b>${totalEp}</b><span>épisodes vus<br><small>au total</small></span></div>
       </div>
 
+      <h3 class="sub">Succès <small class="sub-note">${okCount} / ${BADGES.length} débloqués</small></h3>
+      <div class="badges">${BADGES.map(b => {
+        const v = b.v(bs);
+        const ok = v >= b.goal;
+        const prog = b.money ? `${eur(Math.min(v, b.goal))} / ${eur(b.goal)}` : `${Math.min(Math.floor(v), b.goal)} / ${b.goal}`;
+        return `
+          <div class="badge-item ${ok ? 'ok' : ''}">
+            ${badgeIcon(b, ok)}
+            <span><b>${esc(b.name)}</b><small>${esc(b.desc)}${ok ? '' : ` · ${prog}`}</small></span>
+          </div>`;
+      }).join('')}</div>
+
       <h3 class="sub">Mois par mois</h3>
       <div class="charts">
         ${barChart({ title: 'Score du mois', keys, series: [{ name: 'Score', color: 'var(--c-anime)', values: col(r => r.pct) }], fmt: v => Math.round(v) + ' %' })}
         ${barChart({ title: 'Séances de salle', keys, series: [{ name: 'Séances', color: 'var(--c-gym)', values: col(r => r.sessions) }], fmt: v => String(Math.round(v)), unit: ' séance(s)' })}
         ${barChart({ title: 'Sourates apprises', keys, series: [{ name: 'Sourates', color: 'var(--c-quran)', values: col(r => r.surahs) }], fmt: v => String(Math.round(v)), unit: ' sourate(s)' })}
         ${barChart({ title: 'Épisodes vus', keys, series: [{ name: 'Épisodes', color: 'var(--c-anime)', values: col(r => r.episodes) }], fmt: v => String(Math.round(v)), unit: ' ép.' })}
+        ${hasManga ? barChart({ title: 'Chapitres lus', keys, series: [{ name: 'Chapitres', color: 'var(--c-manga)', values: col(r => r.chapters) }], fmt: v => String(Math.round(v)), unit: ' ch.' }) : ''}
         ${barChart({ title: 'Argent', keys, series: [
           { name: 'Mis de côté', color: 'var(--cat-3)', values: col(r => r.saved) },
           { name: 'Dépensé', color: 'var(--cat-2)', values: col(r => r.spent) }
@@ -1347,8 +1873,8 @@
         <summary>Voir les chiffres en tableau</summary>
         <div class="table-scroll">
           <table>
-            <thead><tr><th>Mois</th><th>Score</th><th>Séances</th><th>Sourates</th><th>Épisodes</th><th>Mis de côté</th><th>Dépensé</th></tr></thead>
-            <tbody>${rows.map(r => `<tr><td>${labelOf(r.k)}</td><td>${r.pct} %</td><td>${r.sessions}</td><td>${r.surahs}</td><td>${r.episodes}</td><td>${eur(r.saved)}</td><td>${eur(r.spent)}</td></tr>`).join('')}</tbody>
+            <thead><tr><th>Mois</th><th>Score</th><th>Séances</th><th>Sourates</th><th>Épisodes</th><th>Chapitres</th><th>Mis de côté</th><th>Dépensé</th></tr></thead>
+            <tbody>${rows.map(r => `<tr><td>${labelOf(r.k)}</td><td>${r.pct} %</td><td>${r.sessions}</td><td>${r.surahs}</td><td>${r.episodes}</td><td>${r.chapters}</td><td>${eur(r.saved)}</td><td>${eur(r.spent)}</td></tr>`).join('')}</tbody>
           </table>
         </div>
       </details>
@@ -1416,6 +1942,8 @@
     applySubs();
     renderAnime();
     renderQuran();
+    renderManga();
+    renderHabits();
     renderGym();
     renderMoney();
     renderTodos();
@@ -1527,16 +2055,16 @@
     const m = M();
     const has = (list, field, value) => list.some(x => String(x[field]).toLowerCase() === String(value).toLowerCase());
 
-    p.animes
+    ['animes', 'mangas'].forEach(list => p[list]
       .filter(a => !(a.total > 0 && a.ep >= a.total))
       .forEach(a => {
-        if (has(m.animes, 'name', a.name)) return;
+        if (has(m[list], 'name', a.name)) return;
         const delta = Math.max(1, a.goal - a.start);
         const goal = a.total > 0 ? Math.min(a.total, a.ep + delta) : a.ep + delta;
         const id = uid();
-        m.animes.push({ id, name: a.name, ep: a.ep, start: a.ep, goal, total: a.total, al: a.al || null });
+        m[list].push({ id, name: a.name, ep: a.ep, start: a.ep, goal, total: a.total, al: a.al || null });
         added.add(id);
-      });
+      }));
 
     if (!m.quranGoal) m.quranGoal = p.quranGoal;
     if (!m.gym.days.length) m.gym.goal = p.gym.goal;
@@ -1915,6 +2443,16 @@
      Événements
      ========================================================= */
   const byId = (list, id) => list.find(x => x.id === id);
+  const kindOf = el => { const k = el && el.closest('[data-kind]'); return k ? k.dataset.kind : 'anime'; };
+  const listOf = kind => M()[KINDS[kind].list];
+  const renderKind = kind => (kind === 'manga' ? renderManga() : renderAnime());
+
+  // Petit journal du jour (épisodes vus, chapitres lus, objectifs cochés) pour les quêtes
+  function logDaily(field, delta) {
+    const k = dateKey(new Date());
+    const day = state.daily[k] || (state.daily[k] = {});
+    day[field] = Math.max(0, (day[field] || 0) + delta);
+  }
 
   document.addEventListener('click', e => {
     if (e.target.classList && e.target.classList.contains('modal')) { e.target.hidden = true; return; }   // clic à côté de la fenêtre
@@ -1998,38 +2536,97 @@
       /* --- animes --- */
       case 'anime-plus':
       case 'anime-minus': {
-        const a = byId(M().animes, id);
+        const kind = kindOf(t);
+        const a = byId(listOf(kind), id);
         if (!a) return;
         const { x, y } = centerOf(t);
         const before = animePct(a);
+        const old = a.ep;
         a.ep = Math.max(0, a.ep + (act === 'anime-plus' ? 1 : -1));
+        if (a.ep !== old) logDaily(kind === 'manga' ? 'ch' : 'ep', a.ep - old);
         if (act === 'anime-plus') markActive();
         const after = animePct(a);
         const reached = before < 1 && after >= 1;
         if (reached) fresh.add(id);
-        save(); renderAnime(); renderHeader(); afterRender();
-        const card = $(`#animeBody [data-id="${id}"]`);
+        save(); renderKind(kind); renderHeader(); afterRender();
+        const card = $(`${KINDS[kind].body} [data-id="${id}"]`);
         if (card) bump($('.ep-num', card));
         if (act === 'anime-plus') floatText(x, y - 10, '+1');
         if (reached) celebrate(card, 'クリア!');
         break;
       }
       case 'anime-del': {
+        const kind = kindOf(t);
         const m = M();
-        const a = byId(m.animes, id);
+        const list = KINDS[kind].list;
+        const a = byId(m[list], id);
         if (!a) return;
         const snap = snapshot();
-        m.animes = m.animes.filter(x => x.id !== id);
-        save(); renderAnime(); renderHeader(); afterRender();
+        m[list] = m[list].filter(x => x.id !== id);
+        save(); renderKind(kind); renderHeader(); afterRender();
         toast(`« ${a.name} » supprimé.`, snap);
         break;
       }
       case 'anime-rate': {
-        const a = byId(M().animes, id);
+        const kind = kindOf(t);
+        const a = byId(listOf(kind), id);
         if (!a) return;
         const v = Number(t.dataset.v);
         a.rating = a.rating === v ? 0 : v;
-        save(); renderAnime(); afterRender();
+        save(); renderKind(kind); afterRender();
+        break;
+      }
+
+      /* --- habitudes --- */
+      case 'habit-idea': {
+        const idea = HABIT_IDEAS[Number(t.dataset.i)];
+        if (!idea || state.habits.some(h => h.name === idea.name)) return;
+        const hid = uid();
+        state.habits.push({ id: hid, name: idea.name, target: idea.target });
+        save(); renderHabits(); renderHeader(); afterRender();
+        break;
+      }
+      case 'habit-tap':
+      case 'habit-dot':
+      case 'habit-cell': {
+        const h = byId(state.habits, id);
+        if (!h) return;
+        const m = M();
+        const tg = h.target || 1;
+        const d = act === 'habit-cell' ? Number(t.dataset.day) : new Date().getDate();
+        const c = habitCount(m, h.id, d);
+        let nc;
+        if (act === 'habit-cell') nc = c >= tg ? 0 : tg;
+        else if (act === 'habit-dot') { const v = Number(t.dataset.v); nc = c === v ? v - 1 : v; }
+        else nc = c >= tg ? 0 : c + 1;
+        setHabit(m, h.id, d, nc);
+        const nowDone = nc >= tg && c < tg;
+        if (nc > c) markActive();
+        if (nowDone && act !== 'habit-cell') fresh.add('h' + h.id);
+        save(); renderHabits(); renderHeader(); afterRender();
+        if (nowDone && act !== 'habit-cell') celebrate($(`#habitBody .h-card[data-id="${h.id}"]`), null, true);
+        break;
+      }
+      case 'habit-del': {
+        const h = byId(state.habits, id);
+        if (!h) return;
+        const snap = snapshot();
+        state.habits = state.habits.filter(x => x.id !== id);
+        save(); renderHabits(); renderHeader(); afterRender();
+        toast(`Habitude « ${h.name} » supprimée.`, snap);
+        break;
+      }
+
+      /* --- révision --- */
+      case 'review': {
+        const n = Number(t.dataset.n);
+        const today = dateKey(new Date());
+        const list = state.quran.reviews[today] || [];
+        const had = list.includes(n);
+        state.quran.reviews[today] = had ? list.filter(x => x !== n) : [...list, n];
+        if (!state.quran.reviews[today].length) delete state.quran.reviews[today];
+        if (!had) { markActive(); const { x, y } = centerOf(t); floatText(x, y - 8, `+${XP.review} XP`); }
+        save(); renderQuran(); renderHeader(); afterRender();
         break;
       }
       case 'sugg-pick': {
@@ -2076,11 +2673,14 @@
         if (k && k !== current) {
           if (!confirm(`${SOURATES[n - 1]} est notée comme apprise en ${labelOf(k)}.\nLa retirer de ta liste ?`)) return;
           delete learned[n];
+          delete state.quran.learnedOn[n];
         } else if (k) {
           delete learned[n];
+          delete state.quran.learnedOn[n];
         } else {
           const before = learnedIn(current);
           learned[n] = current;
+          state.quran.learnedOn[n] = dateKey(new Date());
           markActive();
           fresh.add('s' + n);
           const { x, y } = centerOf(t);
@@ -2207,6 +2807,7 @@
         const td = byId(M().todos, id);
         if (!td) return;
         td.done = !td.done;
+        logDaily('todo', td.done ? 1 : -1);
         if (td.done) { fresh.add(id); markActive(); }
         save(); renderTodos(); renderHeader(); afterRender();
         if (td.done) celebrate($(`#todoBody [data-id="${id}"] .check`), null, true);
@@ -2241,19 +2842,25 @@
 
     switch (act) {
       case 'anime-name': {
-        const a = byId(m.animes, id);
+        const a = byId(listOf(kindOf(t)), id);
         if (a) { a.name = t.value.trim() || a.name; t.value = a.name; save(); }
         break;
       }
       case 'anime-goal':
       case 'anime-total': {
-        const a = byId(m.animes, id);
+        const kind = kindOf(t);
+        const a = byId(listOf(kind), id);
         if (!a) return;
         const before = animePct(a);
         if (act === 'anime-goal') a.goal = Math.max(0, Math.round(num(t.value, a.goal)));
         else a.total = Math.max(0, Math.round(num(t.value, 0)));
         if (before < 1 && animePct(a) >= 1) fresh.add(id);
-        save(); renderAnime(); renderHeader(); afterRender();
+        save(); renderKind(kind); renderHeader(); afterRender();
+        break;
+      }
+      case 'habit-name': {
+        const h = byId(state.habits, id);
+        if (h) { h.name = t.value.trim() || h.name; t.value = h.name; save(); renderHeader(); }
         break;
       }
       case 'quran-goal':
@@ -2392,20 +2999,21 @@
       return;
     }
 
-    if (type === 'anime') {
+    if (type === 'anime' || type === 'manga') {
+      const K = KINDS[type];
       const name = String(d.name || '').trim();
       if (!name) return;
       const ep = Math.max(0, Math.round(num(d.ep, 0)));
-      const al = picked.anime && picked.anime.title === name ? picked.anime : null;
-      const total = Math.max(0, Math.round(num(d.total, 0))) || (al && al.episodes) || 0;
+      const al = picked[type] && picked[type].title === name ? picked[type] : null;
+      const total = Math.max(0, Math.round(num(d.total, 0))) || (al && al[K.count]) || 0;
       let goal = Math.round(num(d.goal, NaN));
-      if (!Number.isFinite(goal) || goal <= ep) goal = total > ep ? Math.min(total, ep + 12) : ep + 12;
+      if (!Number.isFinite(goal) || goal <= ep) goal = total > ep ? Math.min(total, ep + K.step) : ep + K.step;
       const id = uid();
-      m.animes.push({ id, name, ep, start: ep, goal, total, al, alTried: Boolean(al) });
-      picked.anime = null;
+      m[K.list].push({ id, name, ep, start: ep, goal, total, al, alTried: Boolean(al) });
+      picked[type] = null;
       added.add(id);
-      save(); renderAnime(); renderHeader(); afterRender();
-      $('#animeBody form[data-form="anime"] [name="name"]').focus();
+      save(); renderKind(type); renderHeader(); afterRender();
+      $(`${K.body} form[data-form="${type}"] [name="name"]`).focus();
       if (!al) enrichAnimes();
     }
 
@@ -2492,6 +3100,14 @@
       added.add(id);
       save(); renderMoney(); renderHeader(); afterRender();
       $('#moneyBody form[data-form="jar"] [name="name"]').focus();
+    }
+
+    if (type === 'habit') {
+      const name = String(d.name || '').trim();
+      if (!name) return;
+      state.habits.push({ id: uid(), name, target: Math.min(10, Math.max(1, Math.round(num(d.target, 1)))) });
+      save(); renderHabits(); renderHeader(); afterRender();
+      $('#habitBody form[data-form="habit"] [name="name"]').focus();
     }
 
     if (type === 'todo') {

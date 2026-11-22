@@ -60,7 +60,14 @@
         </svg>
         <span id="streakTxt"></span>
       </div>
+      <button class="hud-chip" data-act="bilan-open" title="Voir tes succès">
+        <span class="badge ok" aria-hidden="true">賞</span>
+        <span><b id="badgeCount">0</b>/24 <small>succès</small></span>
+      </button>
     </div>
+
+    <!-- ===== Quêtes de la semaine ===== -->
+    <section class="quests" id="quests" aria-label="Quêtes de la semaine"></section>
 
     <!-- ===== Barre d'outils ===== -->
     <nav class="toolbar">
@@ -80,7 +87,7 @@
     <!-- ===== Les panneaux ===== -->
     <main class="board" id="board">
       <div class="col">
-        <section class="panel" style="--i:0; --accent: var(--c-anime)">
+        <section class="panel" style="--i:0; --accent: var(--c-anime); --o:2">
           <header class="panel-head">
             <h2>Animes</h2>
             <span class="chip" data-chip="anime">—</span>
@@ -89,16 +96,16 @@
           <div class="panel-body" id="animeBody"></div>
         </section>
 
-        <section class="panel" style="--i:2; --accent: var(--c-gym)">
+        <section class="panel" style="--i:2; --accent: var(--c-manga); --o:5">
           <header class="panel-head">
-            <h2>Salle</h2>
-            <span class="chip" data-chip="gym">—</span>
-            <span class="sfx">ジム</span>
+            <h2>Mangas</h2>
+            <span class="chip" data-chip="manga">—</span>
+            <span class="sfx">漫画</span>
           </header>
-          <div class="panel-body" id="gymBody"></div>
+          <div class="panel-body" id="mangaBody"></div>
         </section>
 
-        <section class="panel" style="--i:4; --accent: var(--c-money)">
+        <section class="panel" style="--i:4; --accent: var(--c-money); --o:6">
           <header class="panel-head">
             <h2>Argent</h2>
             <span class="chip" data-chip="money">—</span>
@@ -109,7 +116,16 @@
       </div>
 
       <div class="col">
-        <section class="panel" style="--i:1; --accent: var(--c-quran)">
+        <section class="panel" style="--i:1; --accent: var(--c-habit); --o:1">
+          <header class="panel-head">
+            <h2>Habitudes</h2>
+            <span class="chip" data-chip="habits">—</span>
+            <span class="sfx">毎日</span>
+          </header>
+          <div class="panel-body" id="habitBody"></div>
+        </section>
+
+        <section class="panel" style="--i:2; --accent: var(--c-quran); --o:3">
           <header class="panel-head">
             <h2>Sourates</h2>
             <span class="chip" data-chip="quran">—</span>
@@ -118,7 +134,16 @@
           <div class="panel-body" id="quranBody"></div>
         </section>
 
-        <section class="panel" style="--i:3; --accent: var(--c-todo)">
+        <section class="panel" style="--i:3; --accent: var(--c-gym); --o:4">
+          <header class="panel-head">
+            <h2>Salle</h2>
+            <span class="chip" data-chip="gym">—</span>
+            <span class="sfx">ジム</span>
+          </header>
+          <div class="panel-body" id="gymBody"></div>
+        </section>
+
+        <section class="panel" style="--i:3; --accent: var(--c-todo); --o:7">
           <header class="panel-head">
             <h2>Autres objectifs</h2>
             <span class="chip" data-chip="todos">—</span>
@@ -127,7 +152,7 @@
           <div class="panel-body" id="todoBody"></div>
         </section>
 
-        <section class="panel panel-notes" style="--i:4; --accent: var(--c-notes)">
+        <section class="panel panel-notes" style="--i:4; --accent: var(--c-notes); --o:8">
           <header class="panel-head">
             <h2>Notes du mois</h2>
             <span class="sfx">メモ</span>
@@ -146,7 +171,7 @@
 
   <!-- Fenêtre de synchro téléphone / PC -->
   <div class="modal" id="syncModal" hidden role="dialog" aria-modal="true" aria-labelledby="syncTitle">
-    <div class="modal-card" style="--accent: var(--c-gym)">
+    <div class="modal-card" style="--accent: var(--c-gym); --o:4">
       <header class="panel-head">
         <h2 id="syncTitle">Synchro tél ↔ PC</h2>
         <span class="sfx">同期</span>
@@ -158,7 +183,7 @@
 
   <!-- Page Bilan -->
   <div class="modal" id="bilanModal" hidden role="dialog" aria-modal="true" aria-labelledby="bilanTitle">
-    <div class="modal-card wide" style="--accent: var(--c-anime)">
+    <div class="modal-card wide" style="--accent: var(--c-anime); --o:2">
       <header class="panel-head">
         <h2 id="bilanTitle">Bilan</h2>
         <span class="sfx">まとめ</span>

@@ -9,6 +9,10 @@ Un petit site au style manga pour noter mes objectifs chaque mois :
 - **Autres objectifs** et **notes du mois**
 - **Animes** : affiches, nombre d'épisodes et dates de sortie récupérés sur AniList, planning de la semaine, liste « à regarder plus tard », note sur 10
 - **Rang RPG** (XP et niveaux), **séries** 🔥 et une page **Bilan** avec les graphiques mois par mois
+- **Habitudes du jour** (grille à cocher, plusieurs fois par jour possible, ex. prières 5/5)
+- **Révision des sourates** : celles pas révisées depuis le plus longtemps sont proposées en premier
+- **Mangas** : chapitres, couvertures et parution via AniList
+- **Quêtes de la semaine** (3 par semaine, +40 XP) et **24 succès** à débloquer
 - **Appli** : installable sur l'écran d'accueil du téléphone (logo dans `icons/`, source dans `icons/logo.html`), marche sans internet
 
 Tout est enregistré dans le navigateur (localStorage).
